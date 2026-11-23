@@ -1,0 +1,52 @@
+<h2>Ranh giới tin cậy</h2>
+<p>Những cửa vào cần kiểm tra: body, path param, query, header; biến môi trường; webhook của ngân hàng hay cổng thanh toán; response của API bên ngoài; file tải lên. Validate ở front-end giúp trải nghiệm tốt hơn. Validate ở server mới là bảo vệ thật, vì ai cũng gọi thẳng API được bằng curl.</p>
+<h2>Schema vừa kiểm tra vừa sinh kiểu</h2>
+<pre><code>import * as z from 'zod';
+
+const PaymentInput = z.object({
+  studentId: z.uuid(),
+  amount: z.number().int().positive(),            <span class="c">// VND, số nguyên</span>
+  method: z.enum(['cash', 'transfer']),
+  note: z.string().max(200).optional(),
+});
+type PaymentInput = z.infer&lt;typeof PaymentInput&gt;;
+<span class="c">// { studentId: string; amount: number; method: 'cash' | 'transfer'; note?: string }</span></code></pre>
+<ul>
+<li><code>.optional()</code> cho phép thiếu, <code>.nullable()</code> cho phép <code>null</code>, <code>.default(x)</code> thiếu thì dùng <code>x</code>.</li>
+<li><code>parse</code> sai thì ném <code>ZodError</code>. <code>safeParse</code> không ném, trả <code>{ success, data }</code> hoặc <code>{ success, error }</code>.</li>
+<li><code>z.flattenError(err)</code> cho <code>{ formErrors, fieldErrors }</code>, hợp với form phẳng. <code>z.prettifyError(err)</code> cho chuỗi dễ đọc để ghi log.</li>
+</ul>
+<h2>Trường lạ và lỗ hổng mass assignment</h2>
+<p><code>z.object</code> mặc định bỏ mọi trường không khai báo:</p>
+<pre><code>PaymentInput.parse({ studentId: '...', amount: 600000, method: 'transfer', paid: true, role: 'admin' });
+<span class="c">// → { studentId: '...', amount: 600000, method: 'transfer' }   paid và role bị bỏ</span></code></pre>
+<p>Nếu bạn ghi nguyên <code>body</code> vào database, kẻ xấu tự gửi thêm <code>paid: true</code> được. Lỗi này gọi là <strong>mass assignment</strong>. <code>z.strictObject</code> từ chối trường lạ, <code>z.looseObject</code> giữ trường lạ.</p>
+<h2><code>coerce</code> cho query string</h2>
+<p>Query string luôn là chuỗi. <code>z.coerce.number()</code> đổi <code>'5'</code> thành <code>5</code>. Body JSON đã đúng kiểu, đừng dùng <code>coerce</code> cho body.</p>
+<h2>Quy tắc liên trường và biến đổi</h2>
+<pre><code>const Term = z.object({ start: z.iso.date(), end: z.iso.date() })
+  .refine((v) =&gt; v.end &gt;= v.start, { message: 'Ngày kết thúc phải sau ngày bắt đầu', path: ['end'] });
+
+const Slug = z.string().trim().toLowerCase().transform((s) =&gt; s.replace(/\s+/g, '-'));
+Slug.parse('  Dế Mèn Phiêu Lưu  '); <span class="c">// 'dế-mèn-phiêu-lưu'</span></code></pre>
+<h2>Validate biến môi trường khi khởi động</h2>
+<pre><code>const Env = z.object({
+  PORT: z.coerce.number().int().default(3000),
+  DATABASE_URL: z.url(),
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+});
+export const env = Env.parse(process.env); <span class="c">// sai là sập ngay khi khởi động</span></code></pre>
+<p>Thiếu <code>DATABASE_URL</code> thì nên sập ngay với thông báo rõ ràng, thay vì lỗi lúc 2 giờ sáng khi có request đầu tiên cần database. Cách làm này gọi là <em>fail fast</em>.</p>
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+<p><span class="wrong">"Có TypeScript rồi thì không cần validate."</span><span class="fix">Sai. Kiểu bị xoá khi chạy. body as Book chỉ là hứa với trình biên dịch.</span></p>
+<p><span class="wrong">"z.coerce.boolean() đọc ?paid=false thành false."</span><span class="fix">Sai. Nó dùng Boolean(x), nên chuỗi 'false' thành true. Dùng z.stringbool().</span></p>
+<p><span class="wrong">"PATCH dùng CreateSchema.partial() là xong."</span><span class="fix">Coi chừng: .partial() vẫn giữ .default(). tags: .default([]) sẽ ghi đè tags thành [] mỗi lần PATCH.</span></p>
+</div>
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+<details><summary>Đã dùng TypeScript, sao còn cần zod?</summary><div><p>TypeScript chỉ kiểm tra lúc biên dịch, kiểu bị xoá khi chạy. Dữ liệu từ request là <code>unknown</code>. zod kiểm tra dữ liệu thật lúc chạy và suy ra kiểu từ cùng một schema, nên kiểu và bộ kiểm tra không lệch nhau.</p></div></details>
+<details><summary>Validate ở client hay server?</summary><div><p>Cả hai, vì hai mục đích. Client để phản hồi ngay cho người dùng. Server để bảo vệ dữ liệu, và đây là lớp bắt buộc. Với TypeScript hai phía có thể dùng chung schema.</p></div></details>
+<details><summary>Mass assignment là gì, phòng thế nào?</summary><div><p>Server ghi nguyên object client gửi vào database, khiến client tự đặt được trường chỉ server được đặt như <code>role</code>, <code>paid</code>. Phòng bằng cách chỉ nhận trường đã khai báo: zod tự bỏ trường lạ, hoặc dùng <code>strictObject</code>.</p></div></details>
+<details><summary>Vì sao validate biến môi trường lúc khởi động?</summary><div><p>Để cấu hình sai làm deploy thất bại ngay với thông báo rõ ràng, thay vì server chạy rồi hỏng ở request đầu tiên. Code bên trong dùng <code>env.PORT</code> đã có kiểu.</p></div></details>
+</div>

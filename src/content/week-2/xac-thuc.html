@@ -1,0 +1,100 @@
+<h2>Hai câu hỏi khác nhau</h2>
+<p>Hình dung toà nhà văn phòng. Ở cổng, bảo vệ kiểm tra thẻ nhân viên: <strong>bạn là ai?</strong> Đó là <strong>xác thực</strong> (authentication, viết tắt AuthN). Lên tới tầng 5, cửa phòng kế toán chỉ mở cho người của phòng kế toán: <strong>bạn được vào đâu?</strong> Đó là <strong>phân quyền</strong> (authorization, viết tắt AuthZ).</p>
+<div class="tbl"><table>
+  <thead><tr><th></th><th>Xác thực (AuthN)</th><th>Phân quyền (AuthZ)</th></tr></thead>
+  <tbody>
+    <tr><td>Câu hỏi</td><td>Bạn là ai?</td><td>Bạn được làm gì?</td></tr>
+    <tr><td>Bằng chứng</td><td>Mật khẩu, token, API key, mã OTP</td><td>Vai trò, quyền sở hữu, chính sách</td></tr>
+    <tr><td>Sai thì trả</td><td>401</td><td>403 (hoặc 404 để giấu sự tồn tại)</td></tr>
+    <tr><td>Thứ tự</td><td>Luôn chạy trước</td><td>Chạy sau, cần biết bạn là ai</td></tr>
+    <tr><td>Ví dụ thu học phí</td><td>Giáo viên đăng nhập bằng số điện thoại và OTP</td><td>Giáo viên chỉ xem được hóa đơn của lớp mình</td></tr>
+  </tbody>
+</table></div>
+
+<h2>Thông tin xác thực đi trong request thế nào</h2>
+<p>Vì HTTP không nhớ gì giữa các request, mỗi request phải tự mang theo bằng chứng. Cách chuẩn là header <code>Authorization</code>:</p>
+<pre><code>GET /books HTTP/1.1
+Authorization: Bearer key-ghi-cua-ban</code></pre>
+<p>Chữ <code>Bearer</code> nghĩa là "ai cầm token này thì được coi là chủ của nó", giống vé xem phim. Vì vậy token phải được giữ bí mật, chỉ gửi qua HTTPS, và không bao giờ đưa vào URL vì URL hay bị ghi vào log.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Cách</th><th>Hợp với</th><th>Ghi chú</th></tr></thead>
+  <tbody>
+    <tr><td>API key</td><td>Máy gọi máy: script, dịch vụ khác, bài luyện tuần này</td><td>Chuỗi ngẫu nhiên dài, lưu ở server dạng băm, có thể thu hồi</td></tr>
+    <tr><td>Session cookie</td><td>Web app có trình duyệt</td><td>Server lưu phiên, trình duyệt tự gửi cookie. Cần chống CSRF</td></tr>
+    <tr><td>JWT</td><td>Nhiều dịch vụ cùng kiểm tra một token</td><td>Token tự chứa thông tin và chữ ký, khó thu hồi trước hạn</td></tr>
+  </tbody>
+</table></div>
+
+<h2>Bài Thứ Năm: thêm API key vào API sách</h2>
+<p>Quy tắc: <code>GET</code> là công khai. <code>POST</code>, <code>PATCH</code>, <code>DELETE</code> cần key. Có hai loại key: <code>read</code> (chỉ đọc) và <code>write</code> (được ghi). Thiếu hoặc sai key thì 401. Key <code>read</code> mà gọi lệnh ghi thì 403.</p>
+<p>Tách thành hai middleware, mỗi cái trả lời đúng một câu hỏi:</p>
+<pre><code>import { createMiddleware } from 'hono/factory';
+import { timingSafeEqual } from 'node:crypto';
+
+type Role = 'read' | 'write';
+export type Env = { Variables: { role: Role } };
+
+// Bài luyện: đọc key từ biến môi trường thay vì viết cứng
+const KEYS: Record&lt;string, Role&gt; = { 'key-doc': 'read', 'key-ghi': 'write' };
+
+function same(a: string, b: string) {
+  const x = Buffer.from(a), y = Buffer.from(b);
+  return x.length === y.length &amp;&amp; timingSafeEqual(x, y);
+}
+
+// Câu hỏi 1: bạn là ai?
+export const requireKey = createMiddleware&lt;Env&gt;(async (c, next) =&gt; {
+  const header = c.req.header('authorization') ?? '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+  const found = Object.entries(KEYS).find(([k]) =&gt; same(k, token));
+  if (!found) {
+    c.header('WWW-Authenticate', 'Bearer');
+    return c.json({ error: { code: 'UNAUTHENTICATED', message: 'Thiếu hoặc sai API key' } }, 401);
+  }
+  c.set('role', found[1]);
+  await next();
+});
+
+// Câu hỏi 2: bạn có được ghi không?
+export const requireWrite = createMiddleware&lt;Env&gt;(async (c, next) =&gt; {
+  if (c.get('role') !== 'write') {
+    return c.json({ error: { code: 'FORBIDDEN', message: 'Key này chỉ được đọc' } }, 403);
+  }
+  await next();
+});
+
+app.post('/books', requireKey, requireWrite, createBook);</code></pre>
+
+<h3>Vì sao dùng <code>timingSafeEqual</code></h3>
+<p>So sánh chuỗi bằng <code>===</code> dừng ngay ở ký tự sai đầu tiên. Kẻ tấn công đo thời gian phản hồi có thể đoán dần từng ký tự của key: ký tự đúng làm phép so sánh lâu hơn một chút. <code>timingSafeEqual</code> luôn so hết, mất thời gian như nhau dù sai ở đâu. Nó yêu cầu hai chuỗi cùng độ dài, nên phải kiểm tra độ dài trước.</p>
+
+<h2>Phân quyền phải chạy ở mọi request</h2>
+<p>Lỗi bảo mật kinh điển: kiểm tra đăng nhập rồi thôi. Giáo viên A đăng nhập hợp lệ, gọi <code>GET /invoices/&lt;id của lớp B&gt;</code>, và server trả hóa đơn vì "đã đăng nhập rồi mà". Lỗi này có tên là <strong>IDOR</strong> (Insecure Direct Object Reference). Cách chặn: mọi truy vấn dữ liệu đều lọc theo chủ sở hữu.</p>
+<pre><code>// Sai: chỉ tìm theo id
+const invoice = await store.findInvoice(id);
+
+// Đúng: tìm theo id VÀ giáo viên đang đăng nhập
+const invoice = await store.findInvoice({ id, teacherId: c.get('teacherId') });
+if (!invoice) throw new AppError(404, 'NOT_FOUND', 'Không có hóa đơn');</code></pre>
+
+<h2>Lưu bí mật đúng cách</h2>
+<ul>
+  <li>Không viết key, mật khẩu vào code hay commit lên Git. Đặt trong biến môi trường, validate bằng zod khi khởi động.</li>
+  <li>File <code>.env</code> phải có trong <code>.gitignore</code>. Commit một file <code>.env.example</code> chỉ có tên biến, không có giá trị.</li>
+  <li>Mật khẩu người dùng không bao giờ lưu nguyên văn. Lưu bản băm bằng thuật toán chậm như <code>scrypt</code> (có sẵn trong <code>node:crypto</code>), bcrypt hoặc argon2.</li>
+</ul>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"Đã đăng nhập thì cho xem dữ liệu."</span><span class="fix">Sai. Đăng nhập chỉ trả lời "bạn là ai". Mỗi truy vấn vẫn phải kiểm tra dữ liệu đó có phải của bạn không.</span></p>
+  <p><span class="wrong">"Gửi token qua query string ?token=... cho tiện."</span><span class="fix">Không. URL bị ghi vào log, lịch sử trình duyệt và header Referer. Dùng header Authorization.</span></p>
+  <p><span class="wrong">"Ẩn nút Xoá ở giao diện là đủ chặn người không có quyền."</span><span class="fix">Sai. Ai cũng gọi thẳng API được. Phân quyền phải nằm ở server.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Authentication và authorization khác nhau thế nào?</summary><div><p>Authentication xác định bạn là ai, bằng mật khẩu, token hay OTP. Authorization quyết định bạn được làm gì, dựa trên vai trò hay quyền sở hữu. Authentication luôn chạy trước. Sai ở authentication trả 401, sai ở authorization trả 403.</p></div></details>
+  <details><summary>IDOR là gì và phòng thế nào?</summary><div><p>Là khi server dùng id do client gửi để lấy dữ liệu mà không kiểm tra người gọi có quyền với dữ liệu đó không. Ví dụ đổi id trên URL là xem được hóa đơn của người khác. Phòng bằng cách mọi truy vấn đều lọc theo chủ sở hữu, và có test cho trường hợp người A truy cập dữ liệu của người B.</p></div></details>
+  <details><summary>Vì sao so sánh token không nên dùng <code>===</code>?</summary><div><p>Vì <code>===</code> dừng ở ký tự sai đầu tiên, nên thời gian phản hồi tiết lộ bao nhiêu ký tự đầu đã đúng. Đó là timing attack. Dùng hàm so sánh thời gian hằng như <code>crypto.timingSafeEqual</code>.</p></div></details>
+  <details><summary>Session cookie và JWT khác nhau thế nào?</summary><div><p>Với session, server lưu trạng thái phiên và cookie chỉ chứa mã phiên, nên thu hồi dễ bằng cách xoá phiên. JWT tự chứa thông tin và chữ ký, server không cần lưu gì, hợp khi nhiều dịch vụ cùng kiểm tra, nhưng khó thu hồi trước khi hết hạn. Với web app một server như công cụ thu học phí, session đơn giản và an toàn hơn.</p></div></details>
+</div>

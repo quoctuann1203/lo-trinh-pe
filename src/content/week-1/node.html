@@ -1,0 +1,62 @@
+<h2>Ngôn ngữ và runtime</h2>
+<p>JavaScript chỉ là ngôn ngữ. Để chạy nó cần một <strong>runtime</strong>: chương trình đọc code JS, chạy nó, và cho nó công cụ để làm việc với thế giới bên ngoài. Trình duyệt là một runtime, cho JS dùng <code>document</code>, <code>fetch</code>, <code>localStorage</code>. Node là runtime không có <code>document</code>, nhưng có <code>fs</code> để đọc ghi file, <code>http</code> để mở server, <code>process</code> để đọc biến môi trường.</p>
+<h2>Ba mảnh ghép bên trong</h2>
+<div class="tbl"><table>
+<thead><tr><th>Mảnh</th><th>Là gì</th><th>Làm gì</th></tr></thead>
+<tbody>
+<tr><td>V8</td><td>Engine JS của Chrome, viết bằng C++</td><td>Biên dịch và chạy code JS, cấp phát bộ nhớ, dọn rác</td></tr>
+<tr><td>libuv</td><td>Thư viện C</td><td>Chạy event loop, làm I/O bất đồng bộ, quản lý thread pool</td></tr>
+<tr><td>API của Node</td><td><code>node:fs</code>, <code>node:http</code>, <code>node:crypto</code>…</td><td>Cầu nối để JS gọi xuống libuv và hệ điều hành</td></tr>
+</tbody>
+</table></div>
+<h2>"Một luồng" chính xác là gì</h2>
+<p>Câu đúng là: <strong>code JavaScript của bạn chạy trên một luồng chính</strong>, mỗi lúc chỉ một đoạn JS chạy. Nhưng cả process Node có nhiều luồng:</p>
+<ul>
+<li><strong>Thread pool của libuv</strong>, mặc định 4 luồng (đổi bằng <code>UV_THREADPOOL_SIZE</code>). Nó làm việc đọc ghi file, <code>dns.lookup</code>, các hàm <code>crypto</code> nặng như <code>pbkdf2</code>, nén <code>zlib</code>.</li>
+<li><strong>I/O mạng</strong> (nhận request, gọi database) không cần thread pool. Hệ điều hành báo cho libuv khi có dữ liệu (epoll trên Linux, kqueue trên macOS).</li>
+<li>V8 có thêm luồng riêng để dọn rác và biên dịch.</li>
+</ul>
+<h2>Chặn và không chặn: quán phở một người phục vụ</h2>
+<p>Hình dung quán phở chỉ có <strong>một người phục vụ</strong> (luồng JS). Anh ta nhận order bàn 1, đưa phiếu vào bếp, rồi đi nhận order bàn 2 ngay, không đứng chờ. Bếp nấu xong thì rung chuông, anh ta mang tô ra khi rảnh tay. Nhờ vậy một người phục vụ được cả chục bàn.</p>
+<p>Nhưng nếu anh ta tự ngồi băm thịt 5 phút (code tính toán nặng), cả quán phải chờ. Đó là <strong>chặn event loop</strong>.</p>
+<pre><code>import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+
+// Chặn: luồng JS đứng chờ đọc xong. Không request nào khác được xử lý.
+const a = readFileSync('big.csv', 'utf8');
+
+// Không chặn: giao việc đọc cho thread pool, luồng JS đi làm việc khác.
+// Chỉ hàm này tạm dừng ở await, cả server không dừng.
+const b = await readFile('big.csv', 'utf8');</code></pre>
+<p>Hệ quả: Node rất hợp với việc <strong>chờ I/O</strong> (API, gọi database), và kém với việc <strong>tính toán nặng</strong> (xử lý ảnh, xuất PDF lớn), trừ khi bạn đẩy việc đó sang <code>worker_threads</code> hoặc một hàng đợi công việc riêng.</p>
+<h2>Concurrency và parallelism</h2>
+<ul>
+<li><strong>Concurrency (đồng thời):</strong> nhiều việc cùng đang dở dang và được xen kẽ nhau. Một người phục vụ lo 10 bàn.</li>
+<li><strong>Parallelism (song song):</strong> nhiều việc thật sự chạy cùng một khoảnh khắc trên nhiều nhân CPU. Cần nhiều người phục vụ.</li>
+</ul>
+<p>Code JS trong Node có concurrency nhờ event loop. Muốn parallelism cho code JS thì phải dùng <code>worker_threads</code> hoặc chạy nhiều process.</p>
+<h2>CommonJS và ES module</h2>
+<div class="tbl"><table>
+<thead><tr><th></th><th>CommonJS</th><th>ES module</th></tr></thead>
+<tbody>
+<tr><td>Cú pháp</td><td><code>require()</code>, <code>module.exports</code></td><td><code>import</code>, <code>export</code></td></tr>
+<tr><td>Tải module</td><td>Đồng bộ, lúc chạy tới dòng đó</td><td>Phân tích trước khi chạy</td></tr>
+<tr><td><code>await</code> ở cấp cao nhất</td><td>Không</td><td>Có</td></tr>
+<tr><td>Thư mục hiện tại</td><td><code>__dirname</code></td><td><code>import.meta.dirname</code></td></tr>
+<tr><td>Node nhận ra bằng</td><td><code>.cjs</code>, <code>.cts</code></td><td><code>.mjs</code>, <code>.mts</code>, hoặc <code>"type": "module"</code></td></tr>
+</tbody>
+</table></div>
+<p>Dự án mới nên dùng ES module. Template Hono đã đặt sẵn <code>"type": "module"</code>.</p>
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+<p><span class="wrong">"async là chạy song song trên luồng khác."</span><span class="fix">Sai. async chỉ là cách viết code chờ kết quả. JS vẫn chạy trên một luồng.</span></p>
+<p><span class="wrong">"await làm đứng cả server."</span><span class="fix">Sai. await chỉ tạm dừng hàm chứa nó. Các request khác vẫn chạy.</span></p>
+<p><span class="wrong">"Bọc vòng lặp nặng trong async là hết chặn."</span><span class="fix">Sai. Code tính toán vẫn chạy trên luồng chính, dù nằm trong hàm async.</span></p>
+</div>
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+<details><summary>Node.js có phải single-thread không?</summary><div><p>Code JS của người dùng chạy trên một luồng chính, nên mỗi lúc chỉ một đoạn JS chạy. Nhưng process Node có thêm thread pool của libuv (mặc định 4 luồng) cho file, DNS, crypto, và các luồng của V8. I/O mạng dùng cơ chế báo sự kiện của hệ điều hành.</p></div></details>
+<details><summary>Vì sao một luồng mà Node phục vụ được hàng nghìn kết nối?</summary><div><p>Vì phần lớn thời gian của một request là chờ I/O, và Node không ngồi chờ. Nó giao việc I/O cho hệ điều hành, đi xử lý request khác, khi có kết quả thì event loop chạy callback tương ứng. Luồng JS chỉ bận trong những khoảng ngắn xử lý dữ liệu.</p></div></details>
+<details><summary>Một endpoint xuất PDF mất 3 giây CPU. Bạn xử lý thế nào?</summary><div><p>Không chạy trên luồng chính, vì trong 3 giây đó mọi request khác phải chờ. Đưa vào hàng đợi công việc, trả 202 Accepted kèm mã công việc, xử lý trong worker riêng. Nếu đơn giản hơn thì dùng <code>worker_threads</code>.</p></div></details>
+<details><summary><code>require</code> và <code>import</code> khác nhau thế nào?</summary><div><p><code>require</code> là CommonJS, tải đồng bộ khi chạy tới dòng đó. <code>import</code> là ES module, chuẩn của ngôn ngữ, được phân tích trước khi chạy nên công cụ loại được code thừa, và hỗ trợ <code>await</code> ở cấp cao nhất.</p></div></details>
+</div>

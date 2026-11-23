@@ -1,0 +1,77 @@
+<h2>Test là gì, nói đơn giản</h2>
+<p>Hãy tưởng tượng bạn là giáo viên chấm bài. Bạn có <strong>đáp án</strong>, và bạn so bài làm với đáp án. Một bài test làm đúng việc đó: nó gọi code của bạn với một <strong>đầu vào</strong> cố định, rồi so <strong>kết quả</strong> với điều bạn mong đợi. Khớp thì qua, không khớp thì báo đỏ.</p>
+<pre><code>import { test, expect } from 'vitest';
+import { tinhHocPhi } from './hoc-phi';
+
+test('8 buổi, 150.000đ mỗi buổi thì học phí là 1.200.000đ', () =&gt; {
+  expect(tinhHocPhi(8, 150_000)).toBe(1_200_000);
+});</code></pre>
+<p>Tên test viết như một câu mô tả hành vi. Khi nó hỏng, chỉ đọc tên là biết hành vi nào bị vỡ.</p>
+
+<h2>Vì sao phải viết test</h2>
+<ul>
+  <li><strong>Dám sửa code.</strong> Tuần sau bạn đổi cách lưu từ <code>Map</code> sang database. Có test, bạn chạy một lệnh và biết ngay 5 endpoint còn đúng không. Không có test, bạn phải gõ lại 15 lệnh curl bằng tay.</li>
+  <li><strong>Bắt lỗi sớm và rẻ.</strong> Lỗi tính sai học phí bị test bắt trên máy bạn tốn 1 phút. Cùng lỗi đó bị phụ huynh phát hiện thì tốn cả uy tín.</li>
+  <li><strong>Test là tài liệu sống.</strong> Đọc test của <code>POST /books</code> là biết API chấp nhận gì, từ chối gì, trả mã nào. Và tài liệu này không bao giờ cũ, vì nó cũ là nó hỏng.</li>
+</ul>
+
+<h2>Ba loại test</h2>
+<div class="tbl"><table>
+  <thead><tr><th>Loại</th><th>Kiểm tra gì</th><th>Tốc độ</th><th>Ví dụ trong dự án của bạn</th></tr></thead>
+  <tbody>
+    <tr><td>Unit</td><td>Một hàm hoặc một module, tách khỏi phần còn lại</td><td>Vài mili-giây</td><td>Hàm <code>tinhHocPhi</code>, schema zod của buổi học</td></tr>
+    <tr><td>Integration</td><td>Nhiều phần chạy cùng nhau: route, validate, xử lý lỗi, kho dữ liệu</td><td>Vài chục mili-giây</td><td>Gửi <code>POST /books</code> vào app và kiểm tra 201</td></tr>
+    <tr><td>End-to-end (E2E)</td><td>Cả hệ thống như người dùng thật: trình duyệt, server, database</td><td>Vài giây</td><td>Mở trang, bấm điểm danh, thấy học phí đổi</td></tr>
+  </tbody>
+</table></div>
+<p>Hình ảnh quen thuộc là <strong>kim tự tháp test</strong>: nhiều unit test ở đáy vì chúng nhanh và rẻ, ít integration hơn ở giữa, rất ít E2E ở đỉnh vì chúng chậm và dễ hỏng vặt. Với một API như API sách, integration test qua <code>app.request()</code> cho nhiều giá trị nhất trên mỗi dòng code test, vì nó kiểm tra đúng thứ client nhìn thấy mà vẫn chạy rất nhanh.</p>
+
+<h2>Nên test cái gì</h2>
+<p>Đừng hỏi "dòng code này đã được test chưa". Hãy hỏi "<strong>nếu hành vi này hỏng, ai bị ảnh hưởng?</strong>". Ưu tiên:</p>
+<ol class="list">
+  <li><strong>Hành vi chính:</strong> tạo được sách, tính đúng học phí.</li>
+  <li><strong>Ranh giới:</strong> 0 buổi, 1 buổi, giảm giá 100%, chuỗi rỗng, đúng 200 ký tự và 201 ký tự.</li>
+  <li><strong>Đường lỗi:</strong> mỗi mã 4xx bạn hứa trả, và một test cho nhánh 500.</li>
+  <li><strong>Lỗi đã từng xảy ra:</strong> mỗi bug bạn sửa đều nên có một test để nó không quay lại. Ví dụ bẫy PATCH làm mất tags ở tuần 1.</li>
+</ol>
+<p>Không cần test: code của thư viện (zod đã được test bởi tác giả zod), getter và setter tầm thường, và chi tiết bên trong mà client không nhìn thấy.</p>
+
+<h2>Cấu trúc một test: Chuẩn bị, Làm, Kiểm tra</h2>
+<pre><code>test('PATCH chỉ đổi title thì tags giữ nguyên', async () =&gt; {
+  // Chuẩn bị (Arrange): tạo dữ liệu ban đầu
+  const created = await createBook({ title: 'Dế Mèn', tags: ['thiếu nhi'] });
+
+  // Làm (Act): một hành động duy nhất cần kiểm tra
+  const res = await req('PATCH', `/books/${created.id}`, { title: 'Dế Mèn (tái bản)' });
+
+  // Kiểm tra (Assert): kết quả có đúng không
+  expect(res.status).toBe(200);
+  expect((await res.json()).tags).toEqual(['thiếu nhi']);
+});</code></pre>
+<p>Mỗi test kiểm tra <strong>một hành vi</strong>. Test nào kiểm tra năm thứ cùng lúc, khi hỏng bạn phải đọc cả test để biết cái gì vỡ.</p>
+
+<h2>Test tốt có bốn tính chất</h2>
+<ul>
+  <li><strong>Nhanh:</strong> cả bộ chạy trong vài giây, để bạn chạy nó liên tục.</li>
+  <li><strong>Độc lập:</strong> chạy riêng hay chạy chung, theo thứ tự nào cũng ra cùng kết quả. Vì vậy phải reset dữ liệu trước mỗi test.</li>
+  <li><strong>Ổn định:</strong> không phụ thuộc giờ hệ thống, mạng, hay may rủi. Test lúc qua lúc hỏng (gọi là <em>flaky</em>) còn tệ hơn không có test, vì mọi người sẽ học cách lờ màu đỏ đi.</li>
+  <li><strong>Kiểm tra hành vi, không kiểm tra cách làm:</strong> test gọi API và xem response, không đi soi biến bên trong. Như vậy bạn đổi cách cài đặt mà test vẫn đúng.</li>
+</ul>
+
+<h2>TDD: viết test trước</h2>
+<p>Test-Driven Development là vòng lặp ba bước: <strong>Đỏ</strong> (viết một test cho hành vi chưa có, chạy thấy hỏng), <strong>Xanh</strong> (viết code tối thiểu để test qua), <strong>Dọn</strong> (sửa code cho đẹp, test vẫn xanh). Bạn không cần làm TDD cho mọi thứ. Nhưng hôm Thứ Năm, khi thêm API key, hãy thử: viết test 401 và 403 trước, thấy chúng đỏ, rồi mới viết middleware. Cảm giác thấy test chuyển từ đỏ sang xanh cho bạn biết chắc test đó thật sự kiểm tra được thứ gì.</p>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"Coverage 100% nghĩa là không còn bug."</span><span class="fix">Sai. Coverage chỉ nói dòng code đã được chạy, không nói kết quả đã được kiểm tra đúng. Một test không có expect vẫn làm coverage tăng.</span></p>
+  <p><span class="wrong">"Test làm chậm tiến độ."</span><span class="fix">Chỉ chậm ở ngày đầu. Từ lần sửa code thứ hai trở đi, test tiết kiệm thời gian kiểm tra tay.</span></p>
+  <p><span class="wrong">"Càng nhiều E2E test càng chắc."</span><span class="fix">Không. E2E chậm và hay hỏng vặt. Dùng ít, cho những luồng quan trọng nhất như thu tiền.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Unit test, integration test và E2E test khác nhau thế nào?</summary><div><p>Unit test kiểm tra một đơn vị nhỏ tách riêng, chạy rất nhanh. Integration test kiểm tra nhiều phần chạy cùng nhau, ví dụ gửi request vào app và kiểm tra response qua cả route, validate và xử lý lỗi. E2E kiểm tra cả hệ thống như người dùng thật, chậm nhất và dễ hỏng vặt nhất. Thường nên có nhiều unit, vừa phải integration, ít E2E.</p></div></details>
+  <details><summary>Bạn quyết định test cái gì thế nào?</summary><div><p>Theo rủi ro: hành vi chính, các ranh giới, mọi đường lỗi mà API hứa trả, và mọi bug đã từng xảy ra. Không test code thư viện hay chi tiết bên trong. Mình test hành vi mà client nhìn thấy, để đổi cách cài đặt không làm hỏng test.</p></div></details>
+  <details><summary>Coverage bao nhiêu là đủ?</summary><div><p>Không có con số thần kỳ. Coverage cao mà test không kiểm tra kết quả thì vô nghĩa. Mình dùng coverage để tìm chỗ chưa test, rồi tự hỏi chỗ đó hỏng thì có sao không. Với logic tiền bạc như tính học phí, mình muốn gần 100% kèm test ranh giới.</p></div></details>
+  <details><summary>Flaky test là gì? Xử lý thế nào?</summary><div><p>Là test lúc qua lúc hỏng dù code không đổi, thường do phụ thuộc thời gian thật, thứ tự chạy, dữ liệu chung giữa các test, hoặc mạng. Xử lý bằng cách reset dữ liệu trước mỗi test, giả lập thời gian, và mock các lời gọi ra ngoài. Không bao giờ chấp nhận "chạy lại là qua".</p></div></details>
+</div>

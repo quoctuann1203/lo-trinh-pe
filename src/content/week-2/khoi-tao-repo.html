@@ -1,0 +1,101 @@
+<h2>Vì sao làm việc này ngay cả khi đổi ý tưởng</h2>
+<p>Dù quyết định Thứ Bảy là làm tiếp hay đổi hướng, bạn vẫn cần một repo sản phẩm có nền móng đúng: chạy được, test được, build được. Nếu đổi ý tưởng, chỉ cần đổi tên repo. Phần nền móng bên dưới giống hệt.</p>
+
+<h2>Bước 1: tạo project</h2>
+<pre><code>npx create-next-app@latest hocphi --ts --app --no-tailwind --eslint --src-dir --import-alias "@/*" --use-npm --yes
+cd hocphi
+npm run dev        # mở http://localhost:3000</code></pre>
+<p>Ý nghĩa các cờ: <code>--ts</code> dùng TypeScript; <code>--app</code> dùng App Router; <code>--src-dir</code> đặt code trong <code>src/</code>; <code>--import-alias "@/*"</code> cho phép viết <code>import x from '@/lib/x'</code> thay vì <code>'../../lib/x'</code>. Bỏ <code>--no-tailwind</code> nếu bạn muốn dùng Tailwind.</p>
+<p>Next.js 16 khác nhiều so với các video và bài viết cũ. Ba điểm bạn sẽ gặp ngay:</p>
+<ul>
+  <li>Template tạo sẵn file <code>AGENTS.md</code>, nhắc rằng API đã thay đổi và tài liệu đúng phiên bản nằm trong <code>node_modules/next/dist/docs/</code>. Khi nhờ Claude Code viết code, đó chính là tài liệu nó nên đọc.</li>
+  <li><code>params</code> của page là một <strong>Promise</strong>: viết <code>const { id } = await params</code>.</li>
+  <li><code>next.config.ts</code> có thể bật sẵn <code>cacheComponents</code>. Đọc <code>docs/01-app/02-guides/</code> về cache trước khi viết phần đọc dữ liệu.</li>
+</ul>
+
+<h2>Bước 2: cài Vitest theo hướng dẫn chính thức của Next.js</h2>
+<pre><code># Template cài @types/node bản 20, còn Vitest 5 cần bản 22 hoặc từ 24 trở lên.
+# Không nâng trước thì npm báo lỗi ERESOLVE ở lệnh dưới.
+npm install -D @types/node@24
+npm install -D vitest @vitejs/plugin-react jsdom @testing-library/react @testing-library/dom vite-tsconfig-paths</code></pre>
+<p>Gặp lỗi <code>ERESOLVE</code>, đừng vội thêm <code>--force</code> hay <code>--legacy-peer-deps</code>. Đọc dòng "Could not resolve dependency" trong thông báo lỗi: nó cho biết gói nào cần phiên bản nào. Thường chỉ cần nâng đúng gói đó.</p>
+<pre><code>// vitest.config.mts
+import { defineConfig } from 'vitest/config';
+import react from '@vitejs/plugin-react';
+import tsconfigPaths from 'vite-tsconfig-paths';
+
+export default defineConfig({
+  plugins: [tsconfigPaths(), react()],
+  test: { environment: 'jsdom' },
+});</code></pre>
+<p>Thêm script vào <code>package.json</code>:</p>
+<pre><code>"scripts": {
+  "dev": "next dev",
+  "build": "next build",
+  "start": "next start",
+  "lint": "eslint",
+  "typecheck": "tsc --noEmit",
+  "test": "vitest",
+  "test:run": "vitest run"
+}</code></pre>
+<p>Lưu ý từ tài liệu Next.js: Vitest chưa hỗ trợ <code>async</code> Server Component. Component đồng bộ thì test được. Trang async thì dùng E2E test sau này. Vì vậy logic nghiệp vụ nên nằm trong hàm thuần, tách khỏi component, để test dễ.</p>
+
+<h2>Bước 3: cấu trúc thư mục cho một sản phẩm thật</h2>
+<pre><code>src/
+  app/                 ← route: page, layout, route handler. Mỏng, chỉ nối các phần lại
+  components/          ← component giao diện
+  lib/
+    domain/            ← logic nghiệp vụ thuần: tính học phí, khớp giao dịch với hóa đơn
+      hoc-phi.ts
+      hoc-phi.test.ts  ← test đặt cạnh code
+    validation/        ← schema zod dùng chung cho form và API
+validation/            ← giả thuyết, ghi chép phỏng vấn, decision.md từ tuần 1 và 2
+.env.example           ← tên các biến môi trường, không có giá trị</code></pre>
+<p>Nguyên tắc: logic tiền bạc nằm trong <code>lib/domain</code>, không phụ thuộc Next.js, React hay database. Đó là phần quan trọng nhất của công cụ thu học phí, nên nó phải dễ test nhất.</p>
+
+<h2>Bước 4: test đầu tiên</h2>
+<p>Chuyển hàm <code>tinhHocPhi</code> từ bài Thứ Ba sang <code>src/lib/domain/hoc-phi.ts</code>, kèm 6 test của nó. Chạy:</p>
+<pre><code>npm run test:run     # 6 test qua
+npm run typecheck    # không lỗi kiểu
+npm run build        # build thành công</code></pre>
+
+<h2>Bước 5: đưa lên GitHub</h2>
+<pre><code>git add -A
+git commit -m "chore: khởi tạo Next.js, TypeScript, Vitest"
+gh repo create hocphi --private --source=. --push</code></pre>
+<p>Đặt repo ở chế độ <code>--private</code> cho tới khi bạn muốn công khai. Kiểm tra <code>.gitignore</code> đã có <code>.env*</code> trước lần commit đầu tiên. Một khi bí mật đã vào lịch sử Git, xoá file đi là chưa đủ.</p>
+
+<h2>Tuỳ chọn: CI chạy test mỗi lần push</h2>
+<pre><code># .github/workflows/ci.yml
+name: CI
+on: [push, pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test:run
+      - run: npm run build</code></pre>
+<p>Từ giờ, mỗi lần push đều có một dấu xanh hoặc đỏ trên GitHub. Đó cũng là thứ người phỏng vấn hay mở ra xem đầu tiên.</p>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"Xem video Next.js 13 rồi làm theo là được."</span><span class="fix">Coi chừng. Next.js 16 đổi nhiều API, ví dụ params giờ là Promise. Tin tài liệu trong node_modules/next/dist/docs.</span></p>
+  <p><span class="wrong">"Viết logic tính tiền ngay trong page cho nhanh."</span><span class="fix">Không. Tách vào lib/domain thành hàm thuần. Page async khó test, còn hàm thuần thì test trong vài mili-giây.</span></p>
+  <p><span class="wrong">"npm báo ERESOLVE thì thêm --force cho xong."</span><span class="fix">Không. --force cài cả những phiên bản không hợp nhau. Đọc lỗi, nâng đúng gói được nhắc tới.</span></p>
+  <p><span class="wrong">"Commit .env rồi xoá đi ở commit sau là an toàn."</span><span class="fix">Sai. Nó vẫn nằm trong lịch sử Git. Phải đổi ngay khoá bị lộ.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Bạn tổ chức thư mục một project Next.js thế nào?</summary><div><p>Route trong <code>app/</code> giữ mỏng, chỉ nối dữ liệu với giao diện. Component giao diện trong <code>components/</code>. Logic nghiệp vụ là hàm thuần trong <code>lib/domain</code>, không phụ thuộc framework, có test đặt cạnh. Schema zod dùng chung cho form và API. Như vậy phần quan trọng nhất dễ test nhất và không bị khoá vào framework.</p></div></details>
+  <details><summary>Server Component và Client Component khác nhau thế nào?</summary><div><p>Server Component chạy trên server, đọc dữ liệu trực tiếp được và không gửi JavaScript của nó xuống trình duyệt. Client Component, đánh dấu bằng <code>'use client'</code>, chạy cả trong trình duyệt, dùng được state, effect và sự kiện. Mặc định trong App Router là Server Component. Chỉ phần nào cần tương tác mới là Client Component.</p></div></details>
+  <details><summary>CI là gì, bạn cho nó chạy những gì?</summary><div><p>Continuous Integration: mỗi lần push hoặc mở pull request, một máy chủ tự chạy các bước kiểm tra. Mình cho chạy lint, kiểm tra kiểu, test và build. Nếu bước nào đỏ thì không merge. Nó bắt lỗi trước khi lỗi vào nhánh chính.</p></div></details>
+</div>

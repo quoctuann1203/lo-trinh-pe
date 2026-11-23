@@ -1,0 +1,148 @@
+<h2>Từ curl sang test</h2>
+<p>Ở tuần 1 bạn kiểm tra API bằng 15 lệnh curl, đọc mã trạng thái bằng mắt. Test tự động làm đúng việc đó, nhưng máy đọc thay bạn, chạy hết trong chưa tới một giây, và chạy lại được mỗi lần bạn sửa code.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Bằng curl</th><th>Bằng test</th></tr></thead>
+  <tbody>
+    <tr><td>Mở server bằng <code>npm run dev</code></td><td>Không cần: <code>app.request()</code> gọi thẳng vào app</td></tr>
+    <tr><td><code>curl -i -X POST $B/books -d "$BOOK"</code></td><td><code>await app.request('/books', { method: 'POST', body })</code></td></tr>
+    <tr><td>Nhìn dòng <code>HTTP/1.1 201</code></td><td><code>expect(res.status).toBe(201)</code></td></tr>
+    <tr><td>Nhớ xoá dữ liệu giữa các lần thử</td><td><code>beforeEach(() =&gt; resetStore())</code></td></tr>
+  </tbody>
+</table></div>
+<p><code>app.request()</code> nhận đường dẫn và các tuỳ chọn giống <code>fetch</code>, rồi trả về một <code>Response</code> chuẩn. Đó là lý do tuần 1 bạn tách <code>app.ts</code> khỏi <code>index.ts</code>: test import <code>app</code> mà không khởi động server.</p>
+
+<h2>Đặt file test ở đâu</h2>
+<p>Đặt cạnh code: <code>src/books.test.ts</code>. Template Hono dùng <code>"module": "NodeNext"</code>, nên import trong test vẫn ghi đuôi <code>.js</code> như code thường, Vitest tự hiểu. Thêm vào <code>tsconfig.json</code> để <code>npm run build</code> không biên dịch file test vào <code>dist/</code>:</p>
+<pre><code>"exclude": ["node_modules", "src/**/*.test.ts"]</code></pre>
+
+<h2>Bước 1: một hàm trợ giúp gửi request</h2>
+<pre><code>// src/test-helpers.ts
+import { app } from './app.js';
+
+export const KEY_WRITE = 'key-ghi';
+export const KEY_READ = 'key-doc';
+
+export function req(method: string, path: string, body?: unknown, key?: string) {
+  const headers: Record&lt;string, string&gt; = {};
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  if (key) headers['Authorization'] = `Bearer ${key}`;
+  const raw = typeof body === 'string' ? body : JSON.stringify(body);
+  return app.request(path, { method, headers, body: body === undefined ? undefined : raw });
+}
+
+export const validBook = {
+  title: 'Dế Mèn phiêu lưu ký',
+  author: 'Tô Hoài',
+  isbn: '9786040000001',
+  publishedYear: 1941,
+  tags: ['thiếu nhi'],
+};
+
+export async function createBook(overrides: Partial&lt;typeof validBook&gt; = {}) {
+  const res = await req('POST', '/books', { ...validBook, ...overrides }, KEY_WRITE);
+  return res.json();
+}</code></pre>
+<p>Nhận <code>body</code> dạng chuỗi cho phép bạn test JSON hỏng bằng cách truyền thẳng <code>'{oops'</code>.</p>
+
+<h2>Bước 2: mỗi endpoint một nhóm test</h2>
+<pre><code>// src/books.test.ts
+import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { resetStore } from './book-store.js';
+import { createBook, KEY_READ, KEY_WRITE, req, validBook } from './test-helpers.js';
+
+beforeEach(() =&gt; resetStore());
+
+describe('POST /books', () =&gt; {
+  test('dữ liệu hợp lệ → 201, có Location, tags giữ nguyên', async () =&gt; {
+    const res = await req('POST', '/books', validBook, KEY_WRITE);
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(res.headers.get('Location')).toBe(`/books/${body.id}`);
+    expect(body).toMatchObject({ title: validBook.title, tags: ['thiếu nhi'] });
+  });
+
+  test('ISBN trùng → 409 ISBN_TAKEN', async () =&gt; {
+    await createBook();
+    const res = await req('POST', '/books', validBook, KEY_WRITE);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe('ISBN_TAKEN');
+  });
+
+  test('JSON hỏng → 400 INVALID_JSON', async () =&gt; {
+    const res = await req('POST', '/books', '{oops', KEY_WRITE);
+    expect(res.status).toBe(400);
+  });
+
+  test.each([
+    { field: 'title', value: '' },
+    { field: 'publishedYear', value: 3000 },
+    { field: 'isbn', value: '123' },
+  ])('$field = $value → 422, lỗi nằm ở đúng trường', async ({ field, value }) =&gt; {
+    const res = await req('POST', '/books', { ...validBook, [field]: value }, KEY_WRITE);
+    expect(res.status).toBe(422);
+    expect((await res.json()).error.details.fieldErrors).toHaveProperty(field);
+  });
+});</code></pre>
+
+<h2>Bước 3: test riêng cho từng bẫy đã biết</h2>
+<pre><code>describe('PATCH /books/:id', () =&gt; {
+  test('chỉ gửi title → title đổi, tags giữ nguyên', async () =&gt; {
+    const book = await createBook();
+    const res = await req('PATCH', `/books/${book.id}`, { title: 'Dế Mèn (tái bản)' }, KEY_WRITE);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ title: 'Dế Mèn (tái bản)', tags: ['thiếu nhi'] });
+  });
+
+  test('body rỗng {} → 422', async () =&gt; {
+    const book = await createBook();
+    expect((await req('PATCH', `/books/${book.id}`, {}, KEY_WRITE)).status).toBe(422);
+  });
+});</code></pre>
+<p>Đây chính là bẫy <code>.partial()</code> với <code>.default()</code> của tuần 1. Một bug đã từng xảy ra thì phải có test giữ cửa để nó không quay lại.</p>
+
+<h2>Bước 4: test 401, 403 và 500</h2>
+<pre><code>describe('xác thực', () =&gt; {
+  test('ghi mà không có key → 401, kèm WWW-Authenticate', async () =&gt; {
+    const res = await req('POST', '/books', validBook);
+    expect(res.status).toBe(401);
+    expect(res.headers.get('WWW-Authenticate')).toBe('Bearer');
+  });
+
+  test('key chỉ đọc mà ghi → 403', async () =&gt; {
+    expect((await req('POST', '/books', validBook, KEY_READ)).status).toBe(403);
+  });
+
+  test('đọc không cần key → 200', async () =&gt; {
+    expect((await req('GET', '/books')).status).toBe(200);
+  });
+});
+
+test('lỗi bất ngờ → 500, không lộ stack, có ghi log', async () =&gt; {
+  const spy = vi.spyOn(console, 'error').mockImplementation(() =&gt; {});
+  const res = await req('GET', '/__boom');
+  expect(res.status).toBe(500);
+  expect(await res.text()).not.toContain('at ');
+  expect(spy).toHaveBeenCalled();
+  spy.mockRestore();
+});</code></pre>
+
+<h2>Bước 5: đo độ phủ và lấp chỗ trống</h2>
+<pre><code>npx vitest run --coverage --coverage.include='src/**/*.ts' --coverage.exclude='src/**/*.test.ts' --coverage.exclude='src/index.ts'</code></pre>
+<p>Đọc cột "Uncovered Line #s". Với mỗi dòng chưa được chạy, hỏi: dòng này hỏng thì client thấy gì? Nếu câu trả lời quan trọng, viết thêm test. Bỏ <code>index.ts</code> ra khỏi phép đo vì nó chỉ khởi động server.</p>
+
+<h2>Kiểm tra lại chính bộ test</h2>
+<p>Một test chưa từng thấy đỏ thì chưa chắc đã kiểm tra được gì. Cách thử nhanh: cố tình làm hỏng code, ví dụ đổi <code>201</code> thành <code>200</code> trong handler POST, chạy test, thấy đúng test đó đỏ, rồi trả lại. Làm vậy với hai hoặc ba chỗ quan trọng nhất.</p>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"Dùng chung một cuốn sách tạo sẵn cho mọi test cho nhanh."</span><span class="fix">Sai. Test này sửa sách thì test kia hỏng theo, tuỳ thứ tự chạy. Reset kho trong beforeEach, mỗi test tự tạo dữ liệu của nó.</span></p>
+  <p><span class="wrong">"Chỉ cần kiểm tra mã trạng thái là đủ."</span><span class="fix">Chưa đủ. Kiểm tra thêm phần body quan trọng: error.code, trường bị lỗi, dữ liệu trả về. Hai lỗi khác nhau có thể cùng mã 422.</span></p>
+  <p><span class="wrong">"Test qua hết rồi, không cần thử làm hỏng code."</span><span class="fix">Nên thử. Test chưa từng đỏ có thể là test không kiểm tra gì cả.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Bạn test một REST API như thế nào?</summary><div><p>Mình viết integration test gửi request vào app, với Hono là <code>app.request()</code>, không cần mở cổng. Mỗi endpoint có test cho đường thành công và mọi mã lỗi mà nó hứa trả, kiểm tra cả mã trạng thái, header quan trọng và body. Dữ liệu được reset trước mỗi test để các test độc lập. Logic thuần như tính học phí thì có unit test riêng.</p></div></details>
+  <details><summary>Làm sao để các test không ảnh hưởng nhau?</summary><div><p>Mỗi test tự tạo dữ liệu nó cần, và trạng thái chung được reset trong <code>beforeEach</code>: xoá kho trong bộ nhớ, hoặc với database thật thì chạy trong transaction rồi rollback, hay dọn bảng. Không có test nào phụ thuộc vào thứ tự chạy.</p></div></details>
+  <details><summary>Integration test cho API có cần database thật không?</summary><div><p>Tuỳ mục tiêu. Kho trong bộ nhớ cho test rất nhanh và đủ để kiểm tra route, validate, xử lý lỗi. Nhưng các ràng buộc của database như khoá duy nhất hay transaction thì chỉ test được với database thật, thường chạy bằng Docker trong CI. Mình sẽ có cả hai: phần lớn chạy nhanh với kho giả, một nhóm nhỏ chạy với database thật.</p></div></details>
+</div>

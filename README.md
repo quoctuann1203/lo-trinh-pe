@@ -1,36 +1,70 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Lộ trình Product Engineer
 
-## Getting Started
+Web app học theo lộ trình 52 tuần, từ front-end developer lên product engineer. Hiện có tuần 1 và tuần 2. Mỗi tuần có kế hoạch bốn buổi và 8 chủ đề. Mỗi chủ đề có video phát ngay trong trang, phần giải thích từ gốc, các lỗi hay nhầm, và câu hỏi phỏng vấn kèm cách trả lời.
 
-First, run the development server:
+## Chạy trên máy
+
+Cần Node.js 22.12 trở lên (nên dùng 24 LTS).
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev          # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Các lệnh
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Lệnh | Làm gì |
+| --- | --- |
+| `npm run dev` | Chạy chế độ phát triển |
+| `npm run build` | Build bản production, tạo sẵn mọi trang tĩnh |
+| `npm start` | Chạy bản đã build |
+| `npm test` | Vitest ở chế độ theo dõi |
+| `npm run test:run` | Chạy test một lần |
+| `npm run typecheck` | Sinh kiểu route của Next.js rồi kiểm tra TypeScript |
+| `npm run lint` | ESLint |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Đưa lên mạng
 
-## Learn More
+Đây là app tĩnh, deploy được ở bất kỳ đâu chạy Next.js. Cách nhanh nhất là Vercel: đẩy repo lên GitHub, rồi bấm "Import Project" trên vercel.com. Gói Hobby miễn phí chỉ dành cho dự án cá nhân, phi thương mại. Trang học của riêng bạn thuộc loại này.
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+git add -A && git commit -m "feat: tuần 1 và tuần 2"
+gh repo create lo-trinh-pe --private --source=. --push
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Cấu trúc
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```
+src/
+  app/
+    tuan/[week]/page.tsx           ← tổng quan tuần: mục tiêu, bốn buổi
+    tuan/[week]/[topic]/page.tsx   ← trang một chủ đề
+  components/
+    VideoPlayer.tsx                ← trình phát YouTube, chỉ tải khi bấm phát
+    Sidebar.tsx                    ← mục lục, tiến độ, chọn tuần
+    ProgressControls.tsx           ← nút "đã hiểu", checklist mục tiêu
+  content/
+    types.ts                       ← kiểu dữ liệu Week, Topic, Video, Session
+    week-1.ts, week-2.ts           ← danh sách chủ đề, video, kế hoạch buổi
+    week-1/*.html, week-2/*.html   ← phần giải thích chi tiết của từng chủ đề
+  lib/
+    content.ts                     ← đọc nội dung lúc build
+    content.test.ts                ← test kiểm tra nội dung không thiếu, không sai
+    progress.ts                    ← tiến độ học lưu trong localStorage
+```
 
-## Deploy on Vercel
+## Thêm một tuần mới
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. Tạo `src/content/week-3.ts` theo mẫu `week-2.ts`: 8 chủ đề, bốn buổi, mục tiêu.
+2. Tạo thư mục `src/content/week-3/` với một file `<slug>.html` cho mỗi chủ đề.
+3. Thêm `week3` vào mảng `weeks` trong `src/lib/content.ts`.
+4. Chạy `npm run test:run`. Test sẽ báo nếu thiếu file nội dung, mã video sai định dạng, hay buổi học trỏ tới chủ đề không tồn tại.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Mã video là 11 ký tự sau `v=` trong link YouTube. Nếu chủ sở hữu tắt chế độ nhúng, video sẽ không phát trong trang. Khi đó dùng link "Mở trên YouTube" ngay dưới khung video, hoặc thay bằng video khác.
+
+## Ghi chú kỹ thuật
+
+- Video dùng `youtube-nocookie.com` và chỉ tải khi người học bấm phát, nên trang mở nhanh. Phụ đề tiếng Anh được bật sẵn nếu video có.
+- Phông chữ được tự lưu qua các gói `@fontsource` trên npm (có bộ ký tự tiếng Việt), nên build không cần gọi tới Google Fonts.
+- Tiến độ học chỉ lưu trong trình duyệt đang dùng, không đồng bộ giữa các máy.
+- Next.js 16 có thay đổi lớn so với tài liệu cũ. Đọc `AGENTS.md` và `node_modules/next/dist/docs/` trước khi sửa code.

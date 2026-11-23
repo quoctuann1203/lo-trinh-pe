@@ -1,0 +1,76 @@
+<h2>Trước Promise: callback</h2>
+<p>Node ban đầu dùng callback kiểu <code>(err, data)</code>. Lồng nhau vài tầng là thành "callback hell": khó đọc, phải kiểm tra <code>err</code> ở từng tầng, và không dùng được <code>try/catch</code> vì lỗi xảy ra ở lượt event loop khác.</p>
+<h2>Ba trạng thái của một Promise</h2>
+<div class="tbl"><table>
+<thead><tr><th>Trạng thái</th><th>Nghĩa</th></tr></thead>
+<tbody>
+<tr><td>pending</td><td>Đang chờ, chưa có kết quả</td></tr>
+<tr><td>fulfilled</td><td>Thành công, có một giá trị</td></tr>
+<tr><td>rejected</td><td>Thất bại, có một lý do (thường là <code>Error</code>)</td></tr>
+</tbody>
+</table></div>
+<p>Promise chỉ chuyển từ pending sang fulfilled hoặc rejected <strong>một lần duy nhất</strong> rồi giữ nguyên.</p>
+<pre><code>function sleep(ms: number): Promise&lt;void&gt; {
+  return new Promise((resolve) =&gt; setTimeout(resolve, ms));
+}</code></pre>
+<p>Hàm truyền vào <code>new Promise(...)</code> chạy <strong>đồng bộ, ngay lập tức</strong>. Trong code thật bạn hiếm khi cần tự tạo, vì hầu hết API đã trả promise sẵn (<code>node:fs/promises</code>, <code>fetch</code>, driver database).</p>
+<h2>Chuỗi <code>.then</code>, <code>.catch</code>, <code>.finally</code></h2>
+<p>Mỗi <code>.then</code> trả về một promise mới. Callback trả giá trị thì giá trị đó được chuyền tiếp. Callback trả promise thì chuỗi chờ promise đó. Callback ném lỗi thì mọi <code>.then</code> sau bị bỏ qua cho đến <code>.catch</code> gần nhất.</p>
+<pre><code>const v = await Promise.resolve(1)
+  .then((x) =&gt; x + 1)                                       <span class="c">// 2</span>
+  .then((x) =&gt; { throw new Error('ở bước 3: ' + x); })
+  .then(() =&gt; 'bị bỏ qua')
+  .catch((e) =&gt; 'catch: ' + e.message)                      <span class="c">// bắt lỗi, chuỗi chạy tiếp</span>
+  .finally(() =&gt; console.log('finally luôn chạy'));
+console.log(v); <span class="c">// "catch: ở bước 3: 2"</span></code></pre>
+<h2>async/await</h2>
+<ul>
+<li><code>async function</code> <strong>luôn</strong> trả về Promise. <code>return 5</code> nghĩa là promise fulfilled với giá trị 5.</li>
+<li><code>throw</code> trong hàm async nghĩa là promise bị reject. Kể cả lỗi đồng bộ như <code>JSON.parse('{')</code>.</li>
+<li><code>await p</code> tạm dừng <strong>hàm này</strong> cho đến khi <code>p</code> xong. Phần code sau <code>await</code> thành một microtask. Luồng JS không bị chặn.</li>
+<li>Nếu <code>p</code> bị reject, <code>await p</code> ném lỗi ngay tại dòng đó, nên <code>try/catch</code> dùng được.</li>
+</ul>
+<h2>Tuần tự và song song</h2>
+<pre><code>const sleep = (ms: number, v: string) =&gt; new Promise&lt;string&gt;((r) =&gt; setTimeout(() =&gt; r(v), ms));
+
+<span class="c">// Tuần tự: cái sau chờ cái trước. Khoảng 300 ms</span>
+for (const x of ['a', 'b', 'c']) await sleep(100, x);
+
+<span class="c">// Song song: cả ba cùng chờ. Khoảng 100 ms</span>
+await Promise.all(['a', 'b', 'c'].map((x) =&gt; sleep(100, x)));</code></pre>
+<p>Tuần tự khi bước sau cần kết quả bước trước. Song song khi các việc độc lập. Với hàng nghìn phần tử, giới hạn mỗi lần 5 đến 10 việc (ví dụ bằng <code>p-limit</code>) để không làm database quá tải.</p>
+<h2>Bốn hàm kết hợp promise</h2>
+<div class="tbl"><table>
+<thead><tr><th>Hàm</th><th>Thành công khi</th><th>Thất bại khi</th><th>Dùng cho</th></tr></thead>
+<tbody>
+<tr><td><code>Promise.all</code></td><td>Tất cả thành công</td><td>Ngay khi một cái reject</td><td>Cần đủ mọi kết quả</td></tr>
+<tr><td><code>Promise.allSettled</code></td><td>Luôn thành công, trả trạng thái từng cái</td><td>Không bao giờ</td><td>Gửi nhắc học phí cho 30 phụ huynh, muốn biết ai gửi được</td></tr>
+<tr><td><code>Promise.race</code></td><td>Cái đầu tiên xong</td><td>Cái đầu tiên xong là reject</td><td>Đặt timeout</td></tr>
+<tr><td><code>Promise.any</code></td><td>Cái đầu tiên thành công</td><td>Tất cả reject (<code>AggregateError</code>)</td><td>Gọi nhiều nguồn dự phòng</td></tr>
+</tbody>
+</table></div>
+<p>Khi <code>Promise.all</code> thất bại, các promise còn lại vẫn chạy tiếp. Muốn huỷ thật thì dùng <code>AbortController</code> với API có hỗ trợ, như <code>fetch(url, { signal })</code>.</p>
+<h2>Bẫy <code>return</code> và <code>return await</code> trong <code>try</code></h2>
+<pre><code>const boom = async () =&gt; { throw new Error('boom'); };
+
+async function a() {
+  try { return boom(); }        <span class="c">// trả promise ra ngoài ngay, catch KHÔNG bắt được</span>
+  catch { return 'bắt được'; }
+}
+async function b() {
+  try { return await boom(); }  <span class="c">// chờ ngay trong try, catch bắt được</span>
+  catch { return 'bắt được'; }
+}</code></pre>
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+<p><span class="wrong">"arr.forEach(async x =&gt; await save(x)) sẽ chờ lưu xong."</span><span class="fix">Sai. forEach không chờ promise. Dùng for...of với await, hoặc await Promise.all(arr.map(save)).</span></p>
+<p><span class="wrong">"Thêm async trước hàm là hàm chạy nhanh hơn."</span><span class="fix">Sai. Nó chỉ đổi kiểu trả về thành Promise.</span></p>
+<p><span class="wrong">"Promise.all chạy các việc song song."</span><span class="fix">Chính xác hơn: các việc đã bắt đầu từ lúc gọi hàm. Promise.all chỉ chờ chúng cùng lúc.</span></p>
+</div>
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+<details><summary>Promise là gì? Có mấy trạng thái?</summary><div><p>Object đại diện cho kết quả của một việc bất đồng bộ, có ba trạng thái pending, fulfilled, rejected, và chỉ chuyển trạng thái một lần. Gắn xử lý bằng <code>.then</code>/<code>.catch</code> hoặc <code>await</code>.</p></div></details>
+<details><summary>async/await khác Promise thế nào?</summary><div><p>Không phải hai cơ chế khác nhau. async/await là cú pháp xây trên Promise: hàm async trả Promise, <code>await</code> chờ một Promise. Lợi ích là code trông như tuần tự và dùng được <code>try/catch</code>.</p></div></details>
+<details><summary>Cần gọi 3 API độc lập để dựng trang tổng quan. Bạn viết thế nào?</summary><div><p>Gọi song song bằng <code>Promise.all</code> để tổng thời gian bằng cái chậm nhất. Nếu trang vẫn nên hiện khi một API lỗi thì dùng <code>Promise.allSettled</code> và hiện phần có dữ liệu. Đặt timeout cho từng lời gọi.</p></div></details>
+<details><summary>Đoạn <code>arr.forEach(async x =&gt; await save(x))</code> có vấn đề gì?</summary><div><p><code>forEach</code> không chờ promise: code phía sau chạy trước khi lưu xong, và lỗi của <code>save</code> thành lỗi không ai xử lý, làm process sập. Sửa bằng <code>for...of</code> + <code>await</code> hoặc <code>await Promise.all(arr.map(save))</code>.</p></div></details>
+</div>

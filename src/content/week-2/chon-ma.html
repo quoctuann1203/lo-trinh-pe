@@ -1,0 +1,101 @@
+<h2>Vì sao cần một cây quyết định</h2>
+<p>Ở tuần 1 bạn đã có bảng các mã trạng thái. Nhưng khi đang viết code, câu hỏi thật là: "<em>lỗi này</em> nên trả mã nào?". Một lỗi có thể nghe giống nhiều mã cùng lúc. Cây dưới đây biến việc đó thành sáu câu hỏi có/không, hỏi theo đúng thứ tự mà một request thường đi qua server: middleware xác thực, rồi phân quyền, rồi đọc body, validate, tìm dữ liệu, và kiểm tra xung đột.</p>
+
+<figure>
+  <svg viewBox="0 0 760 660" role="img" aria-label="Sáu câu hỏi chọn mã trạng thái, câu đầu tiên sai quyết định mã">
+    <defs><marker id="tree-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="svg-s"/></marker></defs>
+    <text x="24" y="34" font-size="15" font-weight="700" class="svg-t">Hỏi lần lượt từ trên xuống; câu đầu tiên sai quyết định mã</text>
+
+    <g class="svg-line">
+      <path d="M250 116V140" marker-end="url(#tree-arrow)"/><path d="M250 192V216" marker-end="url(#tree-arrow)"/><path d="M250 268V292" marker-end="url(#tree-arrow)"/>
+      <path d="M250 344V368" marker-end="url(#tree-arrow)"/><path d="M250 420V444" marker-end="url(#tree-arrow)"/><path d="M250 496V520" marker-end="url(#tree-arrow)"/>
+      <path d="M460 90H540" marker-end="url(#tree-arrow)"/><path d="M460 166H540" marker-end="url(#tree-arrow)"/><path d="M460 242H540" marker-end="url(#tree-arrow)"/>
+      <path d="M460 318H540" marker-end="url(#tree-arrow)"/><path d="M460 394H540" marker-end="url(#tree-arrow)"/><path d="M460 470H540" marker-end="url(#tree-arrow)"/>
+    </g>
+
+    <rect x="40" y="64" width="420" height="52" rx="8" class="svg-box"/>
+    <text x="56" y="86" font-size="13" font-weight="700" class="svg-t">1. Bạn là ai?</text>
+    <text x="56" y="104" font-size="12" class="svg-s">Có token hoặc API key hợp lệ không</text>
+    <rect x="40" y="140" width="420" height="52" rx="8" class="svg-box"/>
+    <text x="56" y="162" font-size="13" font-weight="700" class="svg-t">2. Bạn có được làm loại việc này không?</text>
+    <text x="56" y="180" font-size="12" class="svg-s">Vai trò của bạn có quyền gọi endpoint này</text>
+    <rect x="40" y="216" width="420" height="52" rx="8" class="svg-box"/>
+    <text x="56" y="238" font-size="13" font-weight="700" class="svg-t">3. Server đọc được request không?</text>
+    <text x="56" y="256" font-size="12" class="svg-s">Body là JSON, param và query đúng kiểu</text>
+    <rect x="40" y="292" width="420" height="52" rx="8" class="svg-box"/>
+    <text x="56" y="314" font-size="13" font-weight="700" class="svg-t">4. Dữ liệu có đúng quy tắc không?</text>
+    <text x="56" y="332" font-size="12" class="svg-s">Schema zod: độ dài, khoảng giá trị, định dạng</text>
+    <rect x="40" y="368" width="420" height="52" rx="8" class="svg-box"/>
+    <text x="56" y="390" font-size="13" font-weight="700" class="svg-t">5. Tài nguyên có tồn tại không?</text>
+    <text x="56" y="408" font-size="12" class="svg-s">Tìm theo id trong kho dữ liệu</text>
+    <rect x="40" y="444" width="420" height="52" rx="8" class="svg-box"/>
+    <text x="56" y="466" font-size="13" font-weight="700" class="svg-t">6. Có xung đột với trạng thái hiện tại không?</text>
+    <text x="56" y="484" font-size="12" class="svg-s">ISBN đã thuộc về một cuốn sách khác</text>
+
+    <text x="258" y="133" font-size="12" class="svg-s">đúng</text><text x="258" y="209" font-size="12" class="svg-s">được</text><text x="258" y="285" font-size="12" class="svg-s">đọc được</text>
+    <text x="258" y="361" font-size="12" class="svg-s">đúng</text><text x="258" y="437" font-size="12" class="svg-s">có</text><text x="258" y="513" font-size="12" class="svg-s">không</text>
+    <text x="500" y="82" text-anchor="middle" font-size="12" class="svg-s">sai</text><text x="500" y="158" text-anchor="middle" font-size="12" class="svg-s">không</text><text x="500" y="234" text-anchor="middle" font-size="12" class="svg-s">không</text>
+    <text x="500" y="310" text-anchor="middle" font-size="12" class="svg-s">sai</text><text x="500" y="386" text-anchor="middle" font-size="12" class="svg-s">không</text><text x="500" y="462" text-anchor="middle" font-size="12" class="svg-s">có</text>
+
+    <rect x="540" y="64" width="180" height="52" rx="8" class="svg-red"/><text x="630" y="88" text-anchor="middle" font-size="14" font-weight="700" class="svg-t">401</text><text x="630" y="105" text-anchor="middle" font-size="12" class="svg-s">Unauthorized</text>
+    <rect x="540" y="140" width="180" height="52" rx="8" class="svg-red"/><text x="630" y="164" text-anchor="middle" font-size="14" font-weight="700" class="svg-t">403</text><text x="630" y="181" text-anchor="middle" font-size="12" class="svg-s">Forbidden</text>
+    <rect x="540" y="216" width="180" height="52" rx="8" class="svg-red"/><text x="630" y="240" text-anchor="middle" font-size="14" font-weight="700" class="svg-t">400</text><text x="630" y="257" text-anchor="middle" font-size="12" class="svg-s">Bad Request</text>
+    <rect x="540" y="292" width="180" height="52" rx="8" class="svg-red"/><text x="630" y="316" text-anchor="middle" font-size="14" font-weight="700" class="svg-t">422</text><text x="630" y="333" text-anchor="middle" font-size="12" class="svg-s">Unprocessable Content</text>
+    <rect x="540" y="368" width="180" height="52" rx="8" class="svg-red"/><text x="630" y="392" text-anchor="middle" font-size="14" font-weight="700" class="svg-t">404</text><text x="630" y="409" text-anchor="middle" font-size="12" class="svg-s">Not Found</text>
+    <rect x="540" y="444" width="180" height="52" rx="8" class="svg-red"/><text x="630" y="468" text-anchor="middle" font-size="14" font-weight="700" class="svg-t">409</text><text x="630" y="485" text-anchor="middle" font-size="12" class="svg-s">Conflict</text>
+
+    <rect x="40" y="520" width="420" height="44" rx="8" class="svg-good"/>
+    <text x="250" y="547" text-anchor="middle" font-size="13" font-weight="700" class="svg-t">Xử lý xong: 200, 201 hoặc 204</text>
+    <rect x="40" y="588" width="680" height="44" rx="8" fill="none" stroke="var(--redpen)" stroke-width="1.5" stroke-dasharray="5 4"/>
+    <text x="380" y="615" text-anchor="middle" font-size="13" class="svg-t">Lỗi bất ngờ ở bất kỳ bước nào (bug, database sập): 500, log ở server</text>
+  </svg>
+  <figcaption>Thứ tự trên là thứ tự hay gặp khi xác thực nằm trong middleware. Server thật có thể đổi chỗ vài bước, nhưng mỗi câu hỏi luôn ứng với đúng một mã.</figcaption>
+</figure>
+
+<h2>Đi qua từng câu hỏi</h2>
+<h3>1. Bạn là ai? Sai thì 401</h3>
+<p>Request không mang thông tin đăng nhập, hoặc thông tin đó sai hay hết hạn. Server không biết bạn là ai. Đăng nhập lại có thể giải quyết. Response 401 nên kèm header <code>WWW-Authenticate</code> cho client biết cách xác thực mà server chấp nhận, ví dụ <code>WWW-Authenticate: Bearer</code>.</p>
+<h3>2. Bạn có được làm việc này không? Không thì 403</h3>
+<p>Server đã biết bạn là ai, nhưng vai trò của bạn không cho phép. Key chỉ được đọc mà gọi <code>DELETE</code>. Phụ huynh gọi API sửa học phí. Đăng nhập lại không giúp gì.</p>
+<h3>3. Server đọc được request không? Không thì 400</h3>
+<p>Body không phải JSON hợp lệ, <code>id</code> không đúng định dạng UUID, <code>?limit=abc</code>. Đây là lỗi <em>hình thức</em>: server còn chưa hiểu bạn muốn gì.</p>
+<h3>4. Dữ liệu có đúng quy tắc không? Không thì 422</h3>
+<p>Server đọc được, nhưng nội dung vi phạm quy tắc: tên rỗng, năm 3000, số buổi âm. Gửi lại y hệt bao nhiêu lần cũng vẫn sai. Đây là chỗ zod làm việc.</p>
+<h3>5. Tài nguyên có tồn tại không? Không thì 404</h3>
+<p>Mọi thứ hợp lệ, nhưng không có cuốn sách nào mang <code>id</code> đó. Một trường hợp đặc biệt: hóa đơn tồn tại nhưng thuộc giáo viên khác. Trả 403 sẽ tiết lộ "hóa đơn này có tồn tại", nên nhiều hệ thống chọn trả 404 để giấu điều đó.</p>
+<h3>6. Có xung đột với trạng thái hiện tại không? Có thì 409</h3>
+<p>Dữ liệu đúng, tài nguyên tồn tại, nhưng thao tác đụng với trạng thái hiện có: ISBN đã thuộc sách khác, tạo hóa đơn tháng 11 lần thứ hai, sửa một hóa đơn đã thanh toán. Nếu trạng thái thay đổi, gửi lại y hệt có thể thành công.</p>
+<h3>Qua hết: 2xx. Bất ngờ: 500</h3>
+<p><code>200</code> khi trả dữ liệu, <code>201</code> khi vừa tạo mới (kèm <code>Location</code>), <code>204</code> khi thành công mà không có gì để trả. Còn lỗi bất ngờ ở bất kỳ bước nào thì là 500, ghi log đầy đủ ở server và trả một thông báo chung cho client.</p>
+
+<h2>Luyện tay: chọn mã cho các tình huống</h2>
+<p>Che cột bên phải, tự trả lời, rồi mới xem.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Tình huống trong công cụ thu học phí</th><th>Mã</th></tr></thead>
+  <tbody>
+    <tr><td>Gọi <code>GET /invoices</code> mà không gửi token</td><td>401</td></tr>
+    <tr><td>Token hết hạn từ hôm qua</td><td>401</td></tr>
+    <tr><td>Tài khoản phụ huynh gọi <code>PATCH /invoices/:id</code> để sửa số tiền</td><td>403</td></tr>
+    <tr><td>Gửi body <code>{"amount": 600000,}</code> (dấu phẩy thừa)</td><td>400</td></tr>
+    <tr><td>Gửi <code>{"amount": -600000}</code></td><td>422</td></tr>
+    <tr><td><code>GET /students/3f2a9c1e-...</code> với id hợp lệ nhưng không có học sinh đó</td><td>404</td></tr>
+    <tr><td>Tạo hóa đơn tháng 11 cho học sinh đã có hóa đơn tháng 11</td><td>409</td></tr>
+    <tr><td>Ghi nhận thanh toán vào hóa đơn đã ở trạng thái "đã trả"</td><td>409</td></tr>
+    <tr><td>Database mất kết nối giữa chừng</td><td>500 (hoặc 503 nếu bạn chủ động báo đang quá tải)</td></tr>
+    <tr><td>Tạo học sinh thành công</td><td>201</td></tr>
+  </tbody>
+</table></div>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"Unauthorized nghĩa là không có quyền, nên dùng 401 cho mọi chuyện về quyền."</span><span class="fix">Sai. Cái tên 401 đặt nhầm từ lịch sử. 401 là chưa xác thực được bạn là ai. Không có quyền là 403.</span></p>
+  <p><span class="wrong">"Dữ liệu trùng thì trả 400."</span><span class="fix">Nên là 409. Dữ liệu tự nó đúng, nó chỉ xung đột với thứ đã có.</span></p>
+  <p><span class="wrong">"Lỗi gì không rõ cứ trả 400 cho an toàn."</span><span class="fix">Sai. Bug của server mà trả 4xx là đổ lỗi cho client, và client sẽ không bao giờ thử lại. Lỗi bất ngờ là 500.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Một API nhận request tạo hóa đơn. Hãy kể các mã lỗi có thể trả và khi nào.</summary><div><p>401 nếu không có hoặc sai token. 403 nếu người gọi không phải giáo viên của lớp đó. 400 nếu body không đọc được. 422 nếu số tiền âm hay tháng không hợp lệ. 404 nếu học sinh không tồn tại. 409 nếu học sinh đã có hóa đơn tháng đó. 500 cho lỗi bất ngờ. Thành công trả 201 kèm <code>Location</code>.</p></div></details>
+  <details><summary>Khi nào bạn trả 404 thay vì 403?</summary><div><p>Khi chỉ riêng việc thừa nhận tài nguyên tồn tại đã là lộ thông tin, ví dụ hóa đơn của giáo viên khác hay hồ sơ học sinh không thuộc lớp mình. Trả 404 thì người không có quyền không phân biệt được "không tồn tại" với "không được xem".</p></div></details>
+  <details><summary>400 và 422 khác nhau thế nào? Bạn có bắt buộc phải dùng 422 không?</summary><div><p>400 là request sai hình thức, server không đọc được. 422 là đọc được nhưng nội dung vi phạm quy tắc. Không bắt buộc: nhiều API dùng 400 cho cả hai. Điều quan trọng là thống nhất trong toàn API và ghi rõ trong tài liệu.</p></div></details>
+</div>

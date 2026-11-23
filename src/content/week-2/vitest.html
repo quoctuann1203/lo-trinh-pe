@@ -1,0 +1,114 @@
+<h2>Cài đặt và chạy</h2>
+<pre><code>npm install -D vitest
+# package.json → "scripts": { "test": "vitest", "test:run": "vitest run" }
+
+npx vitest          # chế độ theo dõi: sửa file là chạy lại
+npx vitest run      # chạy một lần rồi thoát, dùng cho CI
+npx vitest run hoc-phi   # chỉ chạy file có tên chứa "hoc-phi"</code></pre>
+<p>Vitest 5 cần Node từ 22.12 trở lên. Nó tự tìm các file có <code>.test.</code> hoặc <code>.spec.</code> trong tên. Vitest hiểu TypeScript sẵn, không cần cấu hình thêm cho API sách.</p>
+
+<h2>Năm khối cơ bản</h2>
+<pre><code>import { describe, test, expect, beforeEach, vi } from 'vitest';
+
+describe('tinhHocPhi', () =&gt; {          // nhóm các test liên quan
+  beforeEach(() =&gt; { /* chạy trước MỖI test trong nhóm */ });
+
+  test('8 buổi × 150.000đ', () =&gt; {     // một test
+    expect(tinhHocPhi(8, 150_000)).toBe(1_200_000);   // một khẳng định
+  });
+});</code></pre>
+<ul>
+  <li><code>test</code> (hoặc <code>it</code>, giống hệt nhau): một trường hợp kiểm tra.</li>
+  <li><code>describe</code>: gom test thành nhóm. Kết quả in ra lồng theo nhóm, dễ đọc.</li>
+  <li><code>expect(x)</code> rồi tới một <em>matcher</em> như <code>toBe</code>: khẳng định về <code>x</code>.</li>
+  <li><code>beforeEach</code> / <code>afterEach</code>: chạy trước và sau mỗi test. <code>beforeAll</code> / <code>afterAll</code>: một lần cho cả nhóm.</li>
+  <li><code>vi</code>: hộp đồ nghề để giả lập (mock), theo dõi (spy) và điều khiển thời gian.</li>
+</ul>
+
+<h2>Matcher hay dùng</h2>
+<div class="tbl"><table>
+  <thead><tr><th>Matcher</th><th>Kiểm tra</th><th>Ví dụ</th></tr></thead>
+  <tbody>
+    <tr><td><code>toBe</code></td><td>Bằng nhau tuyệt đối (<code>Object.is</code>). Dùng cho số, chuỗi, boolean</td><td><code>expect(res.status).toBe(201)</code></td></tr>
+    <tr><td><code>toEqual</code></td><td>Bằng nhau theo nội dung, so từng trường. Dùng cho object, mảng</td><td><code>expect(body.tags).toEqual(['thiếu nhi'])</code></td></tr>
+    <tr><td><code>toMatchObject</code></td><td>Object chứa ít nhất các trường này</td><td><code>expect(body).toMatchObject({ title: 'Dế Mèn' })</code></td></tr>
+    <tr><td><code>toThrow</code></td><td>Hàm ném lỗi (truyền vào một hàm, không phải kết quả)</td><td><code>expect(() =&gt; f(-1)).toThrow(RangeError)</code></td></tr>
+    <tr><td><code>toHaveLength</code></td><td>Độ dài mảng hoặc chuỗi</td><td><code>expect(list.data).toHaveLength(2)</code></td></tr>
+    <tr><td><code>expect.any(String)</code></td><td>Giá trị bất kỳ thuộc kiểu này, dùng bên trong <code>toEqual</code></td><td><code>{ id: expect.any(String) }</code></td></tr>
+    <tr><td><code>.not</code></td><td>Đảo ngược</td><td><code>expect(text).not.toContain('at ')</code></td></tr>
+  </tbody>
+</table></div>
+<p>Phân biệt <code>toBe</code> và <code>toEqual</code> là câu hỏi phỏng vấn kinh điển: <code>expect({ a: 1 }).toEqual({ a: 1 })</code> qua, nhưng <code>expect({ a: 1 }).toBe({ a: 1 })</code> hỏng, vì đó là hai object khác nhau trong bộ nhớ.</p>
+
+<h2>Bài luyện của Thứ Ba: hàm tính học phí</h2>
+<pre><code>// src/hoc-phi.ts
+export function tinhHocPhi(soBuoi: number, giaMoiBuoi: number, giamGiaPhanTram = 0): number {
+  if (!Number.isInteger(soBuoi) || soBuoi &lt; 0) throw new RangeError('Số buổi phải là số nguyên không âm');
+  if (giamGiaPhanTram &lt; 0 || giamGiaPhanTram &gt; 100) throw new RangeError('Giảm giá phải từ 0 đến 100');
+  return Math.round((soBuoi * giaMoiBuoi * (100 - giamGiaPhanTram)) / 100);
+}</code></pre>
+<p>Tự viết 6 test trước khi xem gợi ý bên dưới. Gợi ý: một trường hợp thường, ba trường hợp gom bằng <code>test.each</code>, một ranh giới 0 buổi, và hai đường lỗi.</p>
+<pre><code>test.each([
+  { soBuoi: 0, gia: 150_000, giam: 0, ketQua: 0 },
+  { soBuoi: 8, gia: 150_000, giam: 10, ketQua: 1_080_000 },
+  { soBuoi: 3, gia: 99_999, giam: 15, ketQua: 254_997 },   // làm tròn: 254.997,45 → 254.997
+])('$soBuoi buổi × $gia, giảm $giam% → $ketQua', ({ soBuoi, gia, giam, ketQua }) =&gt; {
+  expect(tinhHocPhi(soBuoi, gia, giam)).toBe(ketQua);
+});
+
+test('số buổi âm thì ném RangeError', () =&gt; {
+  expect(() =&gt; tinhHocPhi(-1, 150_000)).toThrow(RangeError);
+});</code></pre>
+<p><code>test.each</code> chạy cùng một test với nhiều bộ dữ liệu. Mỗi bộ hiện thành một dòng riêng trong kết quả, với tên được điền từ <code>$soBuoi</code>, <code>$gia</code>...</p>
+
+<h2>Test code async</h2>
+<p>Hàm test có thể là <code>async</code>. Vitest sẽ chờ promise của nó. <strong>Quên <code>await</code> trước một promise là lỗi hay gặp nhất</strong>: test kết thúc trước khi promise xong, và có thể qua dù code sai.</p>
+<pre><code>test('tạo sách trả 201', async () =&gt; {
+  const res = await app.request('/books', { method: 'POST', body: '...' });  // nhớ await
+  expect(res.status).toBe(201);
+});
+
+// Kiểm tra một promise bị reject
+await expect(loadStudent('')).rejects.toThrow('Thiếu id');</code></pre>
+
+<h2>Mock, spy và giả lập thời gian</h2>
+<p><strong>Mock</strong> là một hàm giả đứng thay cho hàm thật, ghi lại mình bị gọi bao nhiêu lần, với tham số gì. Dùng khi hàm thật đi ra ngoài (gửi Zalo, gọi ngân hàng) hoặc chậm.</p>
+<pre><code>const guiNhac = vi.fn((sdt: string) =&gt; `đã gửi ${sdt}`);
+['0901', '0902'].forEach((s) =&gt; guiNhac(s));
+expect(guiNhac).toHaveBeenCalledTimes(2);
+expect(guiNhac).toHaveBeenLastCalledWith('0902');</code></pre>
+<p><strong>Spy</strong> theo dõi một hàm có sẵn, và có thể thay tạm cách nó chạy. Ví dụ tắt <code>console.error</code> trong test nhánh 500 cho kết quả gọn, mà vẫn kiểm tra được là có log:</p>
+<pre><code>const spy = vi.spyOn(console, 'error').mockImplementation(() =&gt; {});
+const res = await app.request('/__boom');
+expect(res.status).toBe(500);
+expect(spy).toHaveBeenCalledOnce();
+spy.mockRestore();   // trả lại console.error thật</code></pre>
+<p><strong>Giả lập thời gian</strong> cho phép test việc "nhắc nợ sau 3 ngày" mà không phải chờ 3 ngày:</p>
+<pre><code>vi.useFakeTimers();
+const nhac = vi.fn();
+setTimeout(nhac, 3 * 24 * 60 * 60 * 1000);
+vi.advanceTimersByTime(2 * 24 * 60 * 60 * 1000);
+expect(nhac).not.toHaveBeenCalled();
+vi.advanceTimersByTime(24 * 60 * 60 * 1000);
+expect(nhac).toHaveBeenCalledOnce();
+vi.useRealTimers();</code></pre>
+
+<h2>Độ phủ code (coverage)</h2>
+<pre><code>npm install -D @vitest/coverage-v8
+npx vitest run --coverage</code></pre>
+<p>Báo cáo cho biết phần trăm dòng, nhánh và hàm đã được chạy qua, kèm số dòng chưa được chạy. Dùng nó như bản đồ để tìm chỗ chưa test, không phải như điểm số để khoe.</p>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"expect(obj).toBe({ a: 1 }) để so object."</span><span class="fix">Sai. toBe so địa chỉ trong bộ nhớ. Object thì dùng toEqual.</span></p>
+  <p><span class="wrong">"expect(f(-1)).toThrow() để kiểm tra lỗi."</span><span class="fix">Sai. f(-1) ném lỗi ngay trước khi expect kịp bắt. Phải bọc trong hàm: expect(() =&gt; f(-1)).toThrow().</span></p>
+  <p><span class="wrong">"Mock càng nhiều càng tốt cho test nhanh."</span><span class="fix">Không. Mock quá nhiều thì bạn chỉ test được các mock. Chỉ mock những gì đi ra ngoài hoặc không kiểm soát được.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary><code>toBe</code> và <code>toEqual</code> khác nhau thế nào?</summary><div><p><code>toBe</code> so bằng <code>Object.is</code>, tức cùng một giá trị nguyên thuỷ hoặc cùng một object trong bộ nhớ. <code>toEqual</code> so nội dung từng trường một cách đệ quy. Với số và chuỗi dùng <code>toBe</code>, với object và mảng dùng <code>toEqual</code>.</p></div></details>
+  <details><summary>Mock và spy khác gì? Khi nào dùng?</summary><div><p>Mock là hàm giả hoàn toàn thay cho phụ thuộc thật. Spy bọc quanh một hàm có sẵn để ghi lại lời gọi, và có thể giữ hoặc thay cách nó chạy. Dùng khi phụ thuộc đi ra ngoài (mạng, email, thanh toán), chậm, hoặc không xác định như thời gian. Tránh mock chính thứ mình đang test.</p></div></details>
+  <details><summary>Làm sao test một hàm dùng <code>setTimeout</code> hoặc <code>Date.now()</code>?</summary><div><p>Dùng fake timers: <code>vi.useFakeTimers()</code> rồi <code>vi.advanceTimersByTime()</code> để tua thời gian, hoặc <code>vi.setSystemTime()</code> để cố định ngày giờ. Nhớ <code>vi.useRealTimers()</code> sau test. Như vậy test nhanh và không phụ thuộc giờ thật.</p></div></details>
+  <details><summary>Test async qua dù code sai. Nguyên nhân hay gặp?</summary><div><p>Thiếu <code>await</code>: test kết thúc trước khi promise xong nên <code>expect</code> bên trong không kịp chạy, hoặc lỗi xảy ra sau khi test đã được tính là qua. Luôn <code>await</code> và dùng <code>expect(...).rejects</code> cho promise bị reject.</p></div></details>
+</div>

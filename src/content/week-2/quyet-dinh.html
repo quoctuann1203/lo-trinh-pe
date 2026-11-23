@@ -1,0 +1,60 @@
+<h2>Áp luật đã viết từ tuần 1</h2>
+<p>Bạn đã viết luật quyết định trước khi gặp ai: <strong>từ 5 người cam kết trả trước thì làm tiếp, dưới 5 thì đổi ý tưởng</strong>. Và "cam kết" nghĩa là đã chuyển tiền thật, có hứa hoàn tiền. Việc hôm nay là đếm, rồi áp luật. Không phải viết lại luật.</p>
+<p>Cám dỗ lớn nhất lúc này là dời cột gôn: "3 người chuyển cọc, nhưng có 4 người hứa miệng chắc chắn sẽ trả, tính là 7 nhé". Đó chính là lý do bạn viết luật từ tuần 1. Nếu thật sự thấy luật sai, bạn được phép đổi luật cho lần kiểm chứng <em>sau</em>, và phải ghi lý do. Không đổi luật cho lần này.</p>
+
+<h2>Ba kết quả có thể xảy ra</h2>
+<div class="tbl"><table>
+  <thead><tr><th>Kết quả</th><th>Nghĩa là</th><th>Làm gì tiếp</th></tr></thead>
+  <tbody>
+    <tr><td>Từ 5 người cọc</td><td>Có người sẵn sàng trả tiền cho đúng vấn đề này</td><td>Làm tiếp. Xây bản nhỏ nhất giải quyết đúng nỗi đau mạnh nhất, giao cho những người đã cọc trước</td></tr>
+    <tr><td>Dưới 5 người cọc, nhưng có mẫu nỗi đau rõ</td><td>Vấn đề có thật, nhưng giải pháp, giá hoặc đối tượng chưa đúng</td><td>Đổi hướng có chủ đích: giữ vấn đề, thử giải pháp khác, mức giá khác, hoặc phân khúc khác. Viết giả thuyết mới và luật mới</td></tr>
+    <tr><td>Không có mẫu nỗi đau</td><td>Giáo viên không thấy việc thu học phí đau đến mức cần thay đổi</td><td>Đổi ý tưởng. Dùng những gì đã nghe để tìm vấn đề khác. Ví dụ điều bất ngờ nhất trong các cuộc phỏng vấn</td></tr>
+  </tbody>
+</table></div>
+<p>Kết quả nào cũng là thành công của quá trình kiểm chứng. Thất bại thật là tiêu ba tháng để biết điều mà hai tuần đã có thể cho bạn biết.</p>
+
+<h2>Ghi quyết định: mượn khuôn của kỹ sư</h2>
+<p>Kỹ sư phần mềm ghi các quyết định kiến trúc quan trọng bằng <strong>ADR</strong> (Architecture Decision Record): một file ngắn có bối cảnh, quyết định và hệ quả, lưu cùng code. Bạn dùng đúng khuôn đó cho quyết định sản phẩm. Đặt file <code>validation/decision.md</code> cạnh các file phỏng vấn:</p>
+<pre><code># Quyết định 001: Làm tiếp / Đổi ý tưởng công cụ thu học phí
+
+Ngày: ...            Trạng thái: Đã quyết định
+
+## Bối cảnh
+- Giả thuyết (viết ngày ...): ...
+- Luật quyết định viết từ tuần 1: ≥ 5 người chuyển cọc thì làm tiếp.
+- Đã phỏng vấn: 10 giáo viên (6 người quen, 4 người lạ từ group).
+- Danh sách chờ trên landing page: ... người đăng ký từ ... lượt xem.
+
+## Bằng chứng
+- Số người đã chuyển cọc: ...  (tổng ... đồng, cam kết hoàn tiền nếu không ra mắt trước ngày ...)
+- Nỗi đau lặp lại nhiều nhất: "..."  (... trên 10 người)
+- Điều bất ngờ nhất: ...
+- Vùng giá người ta nói là hợp lý: ... đến ... đồng/tháng
+
+## Quyết định
+Làm tiếp / Đổi hướng / Đổi ý tưởng, vì ...
+
+## Hệ quả
+- Việc làm trong 4 tuần tới: ...
+- Điều mình chấp nhận đánh đổi: ...
+- Mình sẽ xem lại quyết định này khi: ...</code></pre>
+<p>Phần "sẽ xem lại khi" quan trọng hơn bạn nghĩ. Nó biến quyết định thành một thí nghiệm có điểm kiểm tra, thay vì một lời hứa mãi mãi. Ví dụ: "xem lại nếu sau 4 tuần có ít hơn 3 trong 5 người cọc dùng app mỗi tuần".</p>
+
+<h2>Nếu làm tiếp: lời hứa với người đã cọc</h2>
+<p>Người đã chuyển cọc là khách hàng đầu tiên của bạn. Nhắn cho từng người: cảm ơn, ngày dự kiến có bản dùng thử, và nhắc lại cam kết hoàn tiền. Giữ đúng hẹn quan trọng hơn mọi tính năng.</p>
+<h2>Nếu đổi ý tưởng: hoàn tiền ngay</h2>
+<p>Hoàn lại toàn bộ tiền cọc trong ngày, kèm lời cảm ơn và một câu ngắn về điều bạn học được. Những người này có thể chính là người bạn phỏng vấn cho ý tưởng tiếp theo.</p>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"Thiếu 1 người nữa là đủ 5, tính luôn người hứa miệng."</span><span class="fix">Không. Luật viết trước là để chống đúng khoảnh khắc này. Đổi luật cho lần sau, ghi lý do.</span></p>
+  <p><span class="wrong">"Đổi ý tưởng là phí 2 tuần."</span><span class="fix">Sai. 2 tuần đó vừa cứu bạn khỏi 3 tháng xây thứ không ai trả tiền, và cho bạn 10 cuộc trò chuyện về một vấn đề thật.</span></p>
+  <p><span class="wrong">"Quyết định trong đầu là đủ, viết ra làm gì."</span><span class="fix">Ba tháng sau bạn sẽ không nhớ vì sao. Và người phỏng vấn muốn thấy bạn quyết định dựa trên bằng chứng nào.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Kể về một quyết định sản phẩm bạn đưa ra dựa trên dữ liệu.</summary><div><p>Kể theo khung: giả thuyết ban đầu, luật quyết định đặt trước, cách thu bằng chứng (10 cuộc phỏng vấn, landing page, lời mời đặt cọc), con số thật, quyết định, và điều bạn học được. Sau tuần 2 bạn có câu chuyện thật của mình. Hãy luyện kể nó trong 2 phút bằng tiếng Việt và 3 phút bằng tiếng Anh.</p></div></details>
+  <details><summary>ADR là gì? Vì sao nên dùng?</summary><div><p>Architecture Decision Record là một tài liệu ngắn ghi một quyết định quan trọng: bối cảnh, lựa chọn, và hệ quả, lưu cùng code. Nó giúp người mới, và chính mình sau này, hiểu vì sao hệ thống như hiện tại, tránh tranh luận lại từ đầu, và biết khi nào nên xem lại quyết định.</p></div></details>
+  <details><summary>Khi nào bạn quyết định dừng một ý tưởng?</summary><div><p>Khi bằng chứng không đạt ngưỡng mình đặt ra từ trước. Mình đặt ngưỡng trước khi thu dữ liệu để tránh tự lừa mình. Dừng không có nghĩa bỏ hết: mình giữ lại những gì học được về người dùng và vấn đề của họ, và thường đó là điểm xuất phát cho ý tưởng tiếp theo.</p></div></details>
+</div>

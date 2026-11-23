@@ -1,0 +1,71 @@
+<h2>Object <code>Error</code></h2>
+<p>Một <code>Error</code> có <code>message</code>, <code>name</code> và <code>stack</code> (các hàm đang chạy lúc lỗi được tạo, kèm file và dòng). Luôn ném <code>new Error(...)</code>. <code>throw 'hết hàng'</code> không có stack, đọc log sẽ không biết lỗi từ đâu.</p>
+<h2>Ba con đường</h2>
+<div class="tbl"><table>
+<thead><tr><th>Kiểu lỗi</th><th>Đi đâu</th><th>Ai bắt được</th></tr></thead>
+<tbody>
+<tr><td><code>throw</code> đồng bộ</td><td>Ngược lên call stack</td><td><code>try/catch</code> gần nhất</td></tr>
+<tr><td>Promise reject</td><td>Theo chuỗi promise</td><td><code>.catch()</code>, hoặc <code>try/catch</code> quanh <code>await</code></td></tr>
+<tr><td><code>emit('error', err)</code></td><td>Tới listener <code>'error'</code></td><td><code>emitter.on('error')</code>. Không có listener thì Node ném lỗi ra ngoài</td></tr>
+</tbody>
+</table></div>
+<p>Lỗi trong callback của timer hay I/O không thuộc call stack ban đầu. Khi callback chạy, hàm đã gọi <code>setTimeout</code> kết thúc từ lâu, nên <code>try/catch</code> bên ngoài không bắt được.</p>
+<h2>Khi không ai bắt</h2>
+<ul>
+<li><strong><code>unhandledRejection</code>:</strong> promise reject mà không có <code>.catch</code> hay <code>await</code>. Từ Node 15, Node in lỗi và thoát với mã 1.</li>
+<li><strong><code>uncaughtException</code>:</strong> lỗi đồng bộ đi hết call stack mà không gặp <code>try/catch</code>. Process sập.</li>
+</ul>
+<pre><code>try {
+  loadStudent('');        <span class="c">// quên await: try/catch KHÔNG bắt được</span>
+} catch {
+  console.log('không bao giờ in dòng này');
+}
+<span class="c">// → process in lỗi và thoát với mã 1</span></code></pre>
+<p>Có thể gắn <code>process.on('uncaughtException')</code> để process không sập, nhưng <strong>đừng chạy tiếp như không có gì</strong>. Lỗi có thể đã xảy ra giữa chừng một thao tác. Ghi log đầy đủ rồi thoát, để Docker, systemd hay Kubernetes khởi động lại một bản sạch.</p>
+<h2>Lỗi vận hành và lỗi lập trình</h2>
+<div class="tbl"><table>
+<thead><tr><th></th><th>Lỗi vận hành</th><th>Lỗi lập trình</th></tr></thead>
+<tbody>
+<tr><td>Là gì</td><td>Tình huống có thể xảy ra dù code đúng</td><td>Bug trong code</td></tr>
+<tr><td>Ví dụ</td><td>Input sai, không có sách, ISBN trùng, database timeout</td><td><code>undefined is not a function</code>, quên <code>await</code></td></tr>
+<tr><td>Xử lý</td><td>Trả 4xx, thử lại, báo người dùng</td><td>Sửa code. Lúc chạy: log, trả 500</td></tr>
+<tr><td>Trong API sách</td><td><code>AppError</code> 400, 404, 409, 422</td><td>Rơi vào nhánh 500 của <code>onError</code></td></tr>
+</tbody>
+</table></div>
+<h2>Lớp lỗi riêng và <code>cause</code></h2>
+<pre><code>class PaymentGatewayError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = 'PaymentGatewayError';
+  }
+}
+
+try {
+  await taoMaQR(hoaDon);
+} catch (err) {
+  throw new PaymentGatewayError(`Không tạo được mã QR cho hóa đơn ${hoaDon.id}`, { cause: err });
+}</code></pre>
+<h2>Tắt server an toàn</h2>
+<p>Khi deploy bản mới, hệ thống gửi <code>SIGTERM</code> cho process cũ. Thoát ngay thì request đang dở bị cắt ngang. Với thanh toán, đó có thể là tiền đã về nhưng chưa gạch nợ. Tắt an toàn: ngừng nhận request mới, chờ request đang chạy xong, đóng database, rồi mới thoát.</p>
+<pre><code>const server = serve({ fetch: app.fetch, port: 3000 });
+
+process.on('SIGTERM', () =&gt; {
+  server.close(() =&gt; {             <span class="c">// chờ request đang chạy xong</span>
+    <span class="c">// await db.end();</span>
+    process.exit(0);
+  });
+  setTimeout(() =&gt; process.exit(1), 10_000).unref(); <span class="c">// quá 10 giây thì buộc thoát</span>
+});</code></pre>
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+<p><span class="wrong">"Bọc try/catch quanh mọi thứ cho chắc."</span><span class="fix">Sai. Catch mà không biết xử lý gì là giấu lỗi. Để lỗi nổi lên chỗ xử lý chung.</span></p>
+<p><span class="wrong">"catch (e) { console.log(e) } là đã xử lý lỗi."</span><span class="fix">Sai. Request vẫn chạy tiếp với dữ liệu hỏng, hoặc client chờ mãi không có response.</span></p>
+<p><span class="wrong">"Server sập là thảm hoạ, phải chặn bằng mọi giá."</span><span class="fix">Không hẳn. Với lỗi lập trình, sập rồi khởi động lại an toàn hơn chạy tiếp với trạng thái hỏng.</span></p>
+</div>
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+<details><summary><code>uncaughtException</code> và <code>unhandledRejection</code> khác nhau thế nào?</summary><div><p><code>uncaughtException</code> là lỗi đồng bộ đi hết call stack mà không gặp <code>try/catch</code>. <code>unhandledRejection</code> là promise reject mà không ai <code>.catch</code> hay <code>await</code>. Từ Node 15, cả hai mặc định làm process thoát.</p></div></details>
+<details><summary>Bạn viết gì trong <code>process.on('uncaughtException')</code>?</summary><div><p>Ghi log đầy đủ kèm stack, gửi lên hệ thống theo dõi lỗi nếu có, rồi thoát với mã khác 0. Không chạy tiếp, vì trạng thái process có thể đã hỏng. Khởi động lại là việc của trình quản lý process.</p></div></details>
+<details><summary>Lỗi vận hành và lỗi lập trình khác gì?</summary><div><p>Lỗi vận hành là tình huống đoán được dù code đúng, như email sai định dạng hay database timeout; xử lý bằng 4xx hoặc thử lại. Lỗi lập trình là bug, như đọc thuộc tính của <code>undefined</code>; sửa code, lúc chạy thì trả 500 và log.</p></div></details>
+<details><summary>Graceful shutdown là gì, vì sao cần?</summary><div><p>Khi nhận <code>SIGTERM</code>, server ngừng nhận kết nối mới, chờ request đang chạy xong, đóng tài nguyên, rồi thoát trong giới hạn thời gian. Nó tránh cắt ngang request khi deploy, nhất là với thanh toán.</p></div></details>
+</div>
