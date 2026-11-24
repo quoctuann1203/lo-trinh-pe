@@ -1,0 +1,97 @@
+<h2>Vì sao không lưu vào file JSON hay Map</h2>
+<p>API sách tuần 1 lưu dữ liệu trong một <code>Map</code>. Tắt server là mất hết. Lưu ra file JSON thì giữ được, nhưng ngay lập tức gặp ba vấn đề:</p>
+<ul>
+  <li><strong>Ghi cùng lúc:</strong> hai request cùng đọc file, cùng sửa, cùng ghi lại. Bản ghi sau đè mất thay đổi của bản trước.</li>
+  <li><strong>Hỏng giữa chừng:</strong> server sập khi đang ghi nửa file, file JSON hỏng và không đọc lại được.</li>
+  <li><strong>Tìm kiếm:</strong> muốn tìm "hoá đơn chưa trả của lớp 3" phải đọc toàn bộ file vào bộ nhớ rồi lọc.</li>
+</ul>
+<p>Cơ sở dữ liệu quan hệ giải quyết đúng ba việc đó: cho nhiều người ghi cùng lúc mà không mất dữ liệu, đảm bảo một thay đổi hoặc xong hẳn hoặc không xảy ra (transaction), và tìm kiếm nhanh nhờ index.</p>
+
+<h2>Mô hình client và server</h2>
+<p>PostgreSQL là một chương trình chạy riêng, lắng nghe ở cổng <code>5432</code>. Ứng dụng của bạn là client: mở kết nối, gửi câu SQL dạng văn bản, nhận lại các dòng kết quả. <code>psql</code> là client dòng lệnh đi kèm Postgres. Tuần 5 bạn sẽ dùng thư viện để code TypeScript làm việc này thay cho <code>psql</code>.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Từ</th><th>Nghĩa</th><th>Ví dụ</th></tr></thead>
+  <tbody>
+    <tr><td>Database</td><td>Một vùng dữ liệu độc lập trong server</td><td><code>hoc</code></td></tr>
+    <tr><td>Bảng (table)</td><td>Tập các dòng cùng cấu trúc</td><td><code>books</code></td></tr>
+    <tr><td>Cột (column)</td><td>Một thuộc tính, có kiểu cố định</td><td><code>title text</code></td></tr>
+    <tr><td>Dòng (row)</td><td>Một bản ghi</td><td>Một cuốn sách</td></tr>
+    <tr><td>Schema</td><td>Cấu trúc các bảng, cột, ràng buộc. Trong Postgres còn là tên một nhóm bảng, mặc định là <code>public</code></td><td><code>02-schema.sql</code></td></tr>
+  </tbody>
+</table></div>
+
+<h2>Chạy Postgres bằng Docker Compose</h2>
+<p>Tạo thư mục <code>sql-practice</code>, trong đó tạo file <code>compose.yaml</code>:</p>
+<pre><code>services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: hoc
+      POSTGRES_PASSWORD: hoc        # chỉ dùng trên máy mình
+      POSTGRES_DB: hoc
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql  # dữ liệu sống sót khi tắt container
+
+volumes:
+  pgdata:</code></pre>
+<pre><code>docker compose up -d                          # chạy nền
+docker compose ps                             # cột STATUS phải là "running"
+docker compose exec db psql -U hoc -d hoc     # vào psql bên trong container</code></pre>
+<p>Từ bản 18, image chính thức lưu dữ liệu dưới <code>/var/lib/postgresql</code> theo từng phiên bản, nên volume gắn vào thư mục đó. Nếu bạn làm theo hướng dẫn cũ gắn vào <code>/var/lib/postgresql/data</code>, container bản 18 sẽ báo lỗi và không chạy.</p>
+
+<h3>Vài lệnh psql cần thuộc</h3>
+<p>Các lệnh bắt đầu bằng dấu gạch chéo ngược là lệnh của <code>psql</code>, không phải SQL, nên không cần dấu chấm phẩy.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Lệnh</th><th>Làm gì</th></tr></thead>
+  <tbody>
+    <tr><td><code>\dt</code></td><td>Liệt kê các bảng</td></tr>
+    <tr><td><code>\d books</code></td><td>Xem cột, kiểu, ràng buộc, index của bảng <code>books</code></td></tr>
+    <tr><td><code>\x</code></td><td>Bật tắt hiển thị dọc, dễ đọc khi bảng nhiều cột</td></tr>
+    <tr><td><code>\timing</code></td><td>Hiện thời gian chạy mỗi câu lệnh</td></tr>
+    <tr><td><code>\q</code></td><td>Thoát</td></tr>
+  </tbody>
+</table></div>
+<p>Câu SQL thì phải kết thúc bằng <code>;</code>. Nếu quên, <code>psql</code> đổi dấu nhắc từ <code>hoc=#</code> thành <code>hoc-#</code> và chờ bạn gõ tiếp.</p>
+
+<h2>Chạy file SQL thay vì gõ tay</h2>
+<p>Gõ trực tiếp trong <code>psql</code> thì tiện để thử, nhưng bài luyện nên nằm trong file để commit được và chạy lại được. Đưa file vào <code>psql</code> qua đầu vào chuẩn:</p>
+<pre><code>docker compose exec -T db psql -U hoc -d hoc -v ON_ERROR_STOP=1 &lt; sql/01-books.sql</code></pre>
+<p><code>-T</code> tắt chế độ terminal để đọc được từ file. <code>ON_ERROR_STOP=1</code> làm <code>psql</code> dừng ở lỗi đầu tiên thay vì chạy tiếp các lệnh sau như không có gì.</p>
+
+<h3>Bảng đầu tiên</h3>
+<pre><code>-- sql/01-books.sql
+DROP TABLE IF EXISTS books;
+
+CREATE TABLE books (
+  id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  title      text NOT NULL,
+  author     text,
+  year       integer,
+  price      integer NOT NULL,      -- đơn vị: đồng
+  tags       text[] NOT NULL DEFAULT '{}',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+INSERT INTO books (title, author, year, price, tags) VALUES
+  ('Dế Mèn phiêu lưu ký', 'Tô Hoài', 1941, 65000, '{thiếu nhi}'),
+  ('Số đỏ', 'Vũ Trọng Phụng', 1936, 80000, '{tiểu thuyết}'),
+  ('Clean Code', 'Robert C. Martin', 2008, 350000, '{lập trình}'),
+  ('Sách chưa rõ tác giả', NULL, NULL, 50000, '{}');
+-- Bài luyện: thêm cho đủ 20 cuốn, có vài cuốn author hoặc year là NULL</code></pre>
+<p><code>GENERATED ALWAYS AS IDENTITY</code> là cách chuẩn hiện nay để Postgres tự sinh id tăng dần. Bạn sẽ còn gặp <code>serial</code> trong tài liệu cũ: nó vẫn chạy, nhưng <code>IDENTITY</code> là cú pháp chuẩn SQL và chặn được việc vô tình chèn id bằng tay.</p>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"Database chỉ là chỗ cất dữ liệu, mọi kiểm tra để code lo."</span><span class="fix">Sai. Database là nơi duy nhất mọi đường ghi dữ liệu đều đi qua. Ràng buộc đặt ở đó thì không bao giờ bị bỏ qua.</span></p>
+  <p><span class="wrong">"Tắt container là mất dữ liệu."</span><span class="fix">Chỉ khi không có volume. Có volume thì <code>docker compose down</code> vẫn giữ dữ liệu. Muốn xoá thật phải chạy <code>docker compose down -v</code>.</span></p>
+  <p><span class="wrong">"Mật khẩu trong compose.yaml thì commit lên GitHub cũng được."</span><span class="fix">Chỉ chấp nhận được cho database tập trên máy mình. Database thật thì mật khẩu nằm trong biến môi trường, không bao giờ nằm trong Git.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Vì sao dùng cơ sở dữ liệu quan hệ thay vì lưu file?</summary><div><p>Vì database lo ba việc mà tự làm rất khó: cho nhiều client ghi cùng lúc mà không mất dữ liệu, đảm bảo mỗi thay đổi hoặc xong trọn vẹn hoặc không xảy ra kể cả khi server sập, và tìm kiếm nhanh nhờ index. Ngoài ra ràng buộc giữ dữ liệu đúng bất kể code ứng dụng có lỗi.</p></div></details>
+  <details><summary>Postgres khác SQLite thế nào, khi nào dùng cái nào?</summary><div><p>SQLite là một thư viện, cả database nằm trong một file và chạy cùng tiến trình với ứng dụng. Nó rất hợp cho app di động, công cụ dòng lệnh, hay web app nhỏ một server. Postgres là server riêng, nhiều ứng dụng kết nối qua mạng, chịu được nhiều người ghi đồng thời và có nhiều tính năng hơn. Với web app có nhiều người dùng như công cụ thu học phí, Postgres là lựa chọn mặc định an toàn.</p></div></details>
+  <details><summary><code>serial</code> và <code>IDENTITY</code> khác nhau thế nào?</summary><div><p>Cả hai đều tạo cột id tự tăng dựa trên một sequence. <code>serial</code> là cú pháp riêng của Postgres, tạo sequence tách rời khỏi cột. <code>GENERATED ALWAYS AS IDENTITY</code> là chuẩn SQL, sequence gắn chặt với cột, và chặn chèn id bằng tay trừ khi bạn nói rõ <code>OVERRIDING SYSTEM VALUE</code>. Bảng mới nên dùng <code>IDENTITY</code>.</p></div></details>
+</div>

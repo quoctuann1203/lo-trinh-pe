@@ -1,0 +1,108 @@
+<h2>Chọn kiểu dữ liệu</h2>
+<p>Kiểu dữ liệu là ràng buộc đầu tiên: cột <code>date</code> không bao giờ chứa được chữ "hôm qua". Bảng dưới đây đủ dùng cho hầu hết bảng của một web app.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Dữ liệu</th><th>Kiểu nên dùng</th><th>Tránh</th></tr></thead>
+  <tbody>
+    <tr><td>Id</td><td><code>bigint GENERATED ALWAYS AS IDENTITY</code></td><td><code>integer</code> cho bảng có thể rất lớn</td></tr>
+    <tr><td>Chữ</td><td><code>text</code>, thêm <code>CHECK</code> độ dài nếu cần</td><td><code>char(n)</code>, vì nó tự thêm dấu cách cho đủ độ dài</td></tr>
+    <tr><td>Tiền đồng Việt Nam</td><td><code>bigint</code>, đơn vị là đồng</td><td><code>real</code>, <code>double precision</code></td></tr>
+    <tr><td>Tiền có phần lẻ (USD)</td><td><code>numeric(12, 2)</code>, hoặc <code>bigint</code> đơn vị cent</td><td><code>real</code>, <code>money</code></td></tr>
+    <tr><td>Thời điểm xảy ra</td><td><code>timestamptz</code></td><td><code>timestamp</code> không có múi giờ</td></tr>
+    <tr><td>Ngày trên lịch (sinh nhật, tháng học phí)</td><td><code>date</code></td><td>Lưu ngày dạng chuỗi</td></tr>
+    <tr><td>Đúng/sai</td><td><code>boolean</code></td><td><code>integer</code> 0/1</td></tr>
+    <tr><td>Danh sách ngắn (tag)</td><td><code>text[]</code></td><td>Chuỗi ngăn cách bằng dấu phẩy</td></tr>
+    <tr><td>Dữ liệu không cố định cấu trúc</td><td><code>jsonb</code></td><td>Dùng jsonb cho dữ liệu vốn có cấu trúc rõ</td></tr>
+  </tbody>
+</table></div>
+<p>Vì sao tiền không dùng số thực: <code>SELECT 0.1::double precision + 0.2</code> ra <code>0.30000000000000004</code>. Cộng hàng nghìn hoá đơn, sai số dồn lại thành tiền lệch. Đồng Việt Nam không có phần lẻ nên <code>bigint</code> là đủ và chính xác tuyệt đối.</p>
+<p>Vì sao dùng <code>timestamptz</code>: nó lưu một thời điểm tuyệt đối (bên trong là UTC) và tự đổi sang múi giờ của phiên khi hiển thị. <code>timestamp</code> chỉ lưu "15 giờ ngày 3", không biết là 15 giờ ở đâu. Server đặt ở Singapore, người dùng ở Hà Nội, bạn sẽ không muốn đoán.</p>
+
+<h2>Năm loại ràng buộc</h2>
+<div class="tbl"><table>
+  <thead><tr><th>Ràng buộc</th><th>Chặn</th><th>Ví dụ</th></tr></thead>
+  <tbody>
+    <tr><td><code>NOT NULL</code></td><td>Thiếu giá trị</td><td>Sách phải có tên</td></tr>
+    <tr><td><code>PRIMARY KEY</code></td><td>Trùng hoặc thiếu id</td><td>Mỗi sách một id duy nhất</td></tr>
+    <tr><td><code>UNIQUE</code></td><td>Trùng giá trị</td><td>Hai sách không cùng ISBN</td></tr>
+    <tr><td><code>CHECK</code></td><td>Giá trị sai quy tắc</td><td>Giá không âm, điểm đánh giá từ 1 tới 5</td></tr>
+    <tr><td><code>FOREIGN KEY</code></td><td>Tham chiếu tới thứ không tồn tại</td><td>Sách trỏ tới tác giả có thật</td></tr>
+  </tbody>
+</table></div>
+
+<h2>Schema sách có ràng buộc</h2>
+<pre><code>-- sql/02-schema.sql
+DROP TABLE IF EXISTS reviews, books, authors;
+
+CREATE TABLE authors (
+  id   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  name text NOT NULL CHECK (length(trim(name)) &gt; 0),
+  born integer CHECK (born BETWEEN 1000 AND 2100)
+);
+
+CREATE TABLE books (
+  id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  author_id  bigint REFERENCES authors (id),          -- được NULL: sách chưa rõ tác giả
+  isbn       text UNIQUE,
+  title      text NOT NULL CHECK (length(trim(title)) &gt; 0),
+  year       integer CHECK (year BETWEEN 1450 AND 2100),
+  price      integer NOT NULL CHECK (price &gt;= 0),
+  tags       text[] NOT NULL DEFAULT '{}',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE reviews (
+  id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  book_id    bigint NOT NULL REFERENCES books (id) ON DELETE CASCADE,
+  rating     smallint NOT NULL CHECK (rating BETWEEN 1 AND 5),
+  body       text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);</code></pre>
+<p>Vài điều đáng để ý:</p>
+<ul>
+  <li><code>DROP TABLE</code> liệt kê bảng con trước bảng cha, vì <code>reviews</code> trỏ tới <code>books</code>, <code>books</code> trỏ tới <code>authors</code>.</li>
+  <li><code>CHECK</code> coi <code>NULL</code> là qua. <code>born</code> là <code>NULL</code> thì không vi phạm <code>BETWEEN</code>. Muốn bắt buộc có giá trị thì thêm <code>NOT NULL</code>.</li>
+  <li><code>UNIQUE</code> cho phép nhiều dòng cùng <code>NULL</code>, vì hai giá trị chưa biết không được coi là bằng nhau. Nhiều sách chưa có ISBN là hợp lệ.</li>
+</ul>
+
+<h3>Khi xoá dòng cha thì dòng con ra sao</h3>
+<div class="tbl"><table>
+  <thead><tr><th>Viết</th><th>Xoá tác giả đang có sách thì</th><th>Hợp với</th></tr></thead>
+  <tbody>
+    <tr><td>Không viết gì (mặc định)</td><td>Báo lỗi, không cho xoá</td><td>Hầu hết trường hợp. An toàn nhất</td></tr>
+    <tr><td><code>ON DELETE CASCADE</code></td><td>Xoá luôn mọi sách của tác giả</td><td>Dữ liệu con không có nghĩa khi mất cha, như đánh giá của một cuốn sách</td></tr>
+    <tr><td><code>ON DELETE SET NULL</code></td><td>Sách còn lại, <code>author_id</code> thành <code>NULL</code></td><td>Quan hệ không bắt buộc</td></tr>
+  </tbody>
+</table></div>
+
+<h2>Bài luyện: 5 lệnh INSERT sai</h2>
+<p>Nạp vài tác giả và sách hợp lệ trước, rồi chạy từng lệnh dưới đây. Chép thông báo lỗi của mỗi lệnh vào notes và gạch chân tên ràng buộc trong đó.</p>
+<pre><code>INSERT INTO books (title, price) VALUES (NULL, 50000);
+-- null value in column "title" of relation "books" violates not-null constraint
+
+INSERT INTO books (title, price) VALUES ('Sách âm tiền', -1);
+-- new row for relation "books" violates check constraint "books_price_check"
+
+INSERT INTO books (title, price, isbn) VALUES ('Bản trùng', 1000, '978-0132350884');
+-- duplicate key value violates unique constraint "books_isbn_key"
+
+INSERT INTO books (title, price, author_id) VALUES ('Sách ma', 1000, 999);
+-- insert or update on table "books" violates foreign key constraint "books_author_id_fkey"
+
+INSERT INTO reviews (book_id, rating) VALUES (1, 6);
+-- new row for relation "reviews" violates check constraint "reviews_rating_check"</code></pre>
+<p>Lệnh thứ ba chỉ báo lỗi nếu đã có sách mang ISBN đó, nên hãy thêm Clean Code với ISBN này trong dữ liệu mẫu. Tên ràng buộc do Postgres tự đặt theo mẫu <code>bảng_cột_loại</code>. Tuần 5, API sẽ đọc tên này để đổi lỗi database thành mã HTTP: <code>unique</code> thành 409, <code>foreign key</code> thành 422.</p>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"Đã validate bằng zod ở API rồi, database không cần ràng buộc nữa."</span><span class="fix">Cần cả hai. zod cho người dùng lỗi dễ hiểu sớm. Ràng buộc chặn mọi đường ghi khác: script nhập dữ liệu, code mới quên validate, hai request chạy song song.</span></p>
+  <p><span class="wrong">"Kiểm tra email chưa tồn tại bằng SELECT rồi mới INSERT là đủ chống trùng."</span><span class="fix">Không. Hai request cùng SELECT, cùng thấy chưa có, cùng INSERT. Chỉ ràng buộc UNIQUE chặn được.</span></p>
+  <p><span class="wrong">"Lưu tiền bằng float cho tiện tính toán."</span><span class="fix">Số thực có sai số làm tròn. Tiền dùng bigint theo đơn vị nhỏ nhất, hoặc numeric.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Đã validate ở ứng dụng thì có cần ràng buộc trong database không?</summary><div><p>Có. Validate ở ứng dụng để báo lỗi thân thiện và sớm. Ràng buộc trong database là bảo đảm cuối cùng, áp cho mọi đường ghi dữ liệu kể cả script và code tương lai, và là cách duy nhất chống trùng khi nhiều request chạy song song. Hai lớp này bổ sung cho nhau, không thay thế nhau.</p></div></details>
+  <details><summary>Bạn lưu tiền bằng kiểu gì, vì sao?</summary><div><p>Với tiền tệ không có phần lẻ như đồng Việt Nam, tôi dùng bigint theo đơn vị đồng. Với tiền có phần lẻ thì bigint theo đơn vị nhỏ nhất như cent, hoặc numeric với số chữ số cố định. Không dùng float hay double vì sai số làm tròn, cũng không dùng kiểu money của Postgres vì nó phụ thuộc cấu hình ngôn ngữ của server.</p></div></details>
+  <details><summary>timestamp và timestamptz khác nhau thế nào?</summary><div><p>timestamptz lưu một thời điểm tuyệt đối, bên trong là UTC, và hiển thị theo múi giờ của phiên kết nối. timestamp chỉ lưu ngày giờ không kèm múi giờ, nên không biết đó là giờ ở đâu. Với thời điểm sự kiện xảy ra như lúc thanh toán, luôn dùng timestamptz.</p></div></details>
+  <details><summary>ON DELETE CASCADE nguy hiểm ở chỗ nào?</summary><div><p>Một lệnh DELETE nhỏ có thể xoá dây chuyền rất nhiều dữ liệu ở các bảng khác mà người viết không để ý. Tôi chỉ dùng CASCADE khi dòng con hoàn toàn vô nghĩa nếu thiếu dòng cha, như các dòng chi tiết của một đơn hàng nháp. Với dữ liệu tài chính như hoá đơn, tôi để mặc định chặn xoá và dùng xoá mềm.</p></div></details>
+</div>

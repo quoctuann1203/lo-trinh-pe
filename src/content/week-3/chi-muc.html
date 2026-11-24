@@ -1,0 +1,82 @@
+<h2>Không có index thì database làm gì</h2>
+<p>Bạn hỏi "các khoản đóng của hoá đơn số 12345". Không có index trên <code>payments.invoice_id</code>, Postgres chỉ có một cách: đọc từng dòng của bảng <code>payments</code>, giữ những dòng khớp. Cách này gọi là quét tuần tự (sequential scan). Với 20.000 dòng thì vẫn nhanh. Với 20 triệu dòng thì mỗi lần mở trang lịch sử thanh toán mất vài giây.</p>
+<p>Index B-tree là một cây đã sắp xếp theo giá trị cột, mỗi lá trỏ tới vị trí dòng trong bảng. Tìm một giá trị chỉ cần đi từ gốc xuống lá qua vài tầng, kể cả khi bảng có hàng triệu dòng. Giống tra từ điển: bạn không đọc từ trang đầu, bạn mở khoảng giữa rồi chia đôi dần.</p>
+
+<h2>EXPLAIN ANALYZE: nhìn database làm việc</h2>
+<pre><code>EXPLAIN ANALYZE
+SELECT * FROM payments WHERE invoice_id = 12345;</code></pre>
+<p>Đây là kết quả thật trên dữ liệu mẫu của Thứ Bảy, chạy bằng PostgreSQL 18. Số cụ thể trên máy bạn sẽ khác:</p>
+<pre><code>Seq Scan on payments  (cost=0.00..431.00 rows=1 width=32) (actual time=0.602..0.627 rows=1.00 loops=1)
+  Filter: (invoice_id = 12345)
+  Rows Removed by Filter: 21679
+  Buffers: shared hit=160
+Planning Time: 0.017 ms
+Execution Time: 0.631 ms</code></pre>
+<div class="tbl"><table>
+  <thead><tr><th>Phần</th><th>Đọc thế nào</th></tr></thead>
+  <tbody>
+    <tr><td><code>Seq Scan on payments</code></td><td>Cách database chọn: quét cả bảng</td></tr>
+    <tr><td><code>cost=...</code>, <code>rows=1</code></td><td>Dự đoán trước khi chạy. <code>cost</code> là đơn vị tương đối, không phải mili giây</td></tr>
+    <tr><td><code>actual time=...</code>, <code>rows=1</code></td><td>Kết quả thật, chỉ có khi dùng <code>ANALYZE</code></td></tr>
+    <tr><td><code>Rows Removed by Filter: 21679</code></td><td>Đọc hơn hai vạn dòng để giữ lại một. Dấu hiệu rõ nhất là cần index</td></tr>
+    <tr><td><code>Buffers: shared hit=160</code></td><td>Đã đọc 160 trang dữ liệu, mỗi trang 8 KB. Từ bản 18, <code>EXPLAIN ANALYZE</code> tự in dòng này</td></tr>
+    <tr><td><code>Execution Time</code></td><td>Tổng thời gian chạy thật</td></tr>
+  </tbody>
+</table></div>
+<p><code>EXPLAIN</code> không có <code>ANALYZE</code> chỉ cho xem kế hoạch, không chạy. <code>EXPLAIN ANALYZE</code> chạy thật, nên với <code>UPDATE</code> hay <code>DELETE</code> phải bọc trong <code>BEGIN</code> và <code>ROLLBACK</code>.</p>
+
+<h2>Thêm index rồi đo lại</h2>
+<pre><code>CREATE INDEX payments_invoice_id_idx ON payments (invoice_id);
+
+EXPLAIN ANALYZE
+SELECT * FROM payments WHERE invoice_id = 12345;</code></pre>
+<pre><code>Index Scan using payments_invoice_id_idx on payments  (cost=0.29..8.30 rows=1 width=32) (actual time=0.024..0.024 rows=1.00 loops=1)
+  Index Cond: (invoice_id = 12345)
+  Index Searches: 1
+  Buffers: shared hit=4 read=2
+Planning Time: 0.059 ms
+Execution Time: 0.029 ms</code></pre>
+<p>Từ 0,63 ms xuống 0,03 ms, và từ 160 trang xuống 6 trang. Với hai vạn dòng, cả hai con số đều nhỏ tới mức người dùng không cảm nhận được. Nhưng quét tuần tự tăng theo kích thước bảng, còn tra index gần như không đổi: bảng lớn gấp nghìn lần thì khoảng cách cũng lớn gấp nghìn lần. Ghi cả hai số đo vào notes. Đây là bằng chứng bạn sẽ kể khi phỏng vấn: "tôi đo, tôi thêm index, tôi đo lại", không phải "tôi nghe nói nên thêm index".</p>
+
+<h3>Index nhiều cột: thứ tự quan trọng</h3>
+<p>Câu hỏi 1 của Thứ Bảy lọc hoá đơn theo lớp và tháng. Một index trên hai cột:</p>
+<pre><code>CREATE INDEX invoices_class_month_idx ON invoices (class_id, billing_month);</code></pre>
+<p>Index này sắp theo <code>class_id</code> trước, trong mỗi lớp mới sắp theo tháng, giống danh bạ sắp theo họ rồi mới theo tên. Nó giúp được truy vấn lọc theo <code>class_id</code>, hoặc theo <code>class_id</code> và <code>billing_month</code>. Nó gần như không giúp được truy vấn chỉ lọc theo <code>billing_month</code>, cũng như danh bạ sắp theo họ không giúp bạn tìm mọi người tên "An".</p>
+<p>Bảng <code>invoices</code> đã có sẵn ràng buộc <code>UNIQUE (class_id, student_id, billing_month)</code>, và Postgres tự tạo index cho nó. Chạy <code>\d invoices</code> để xem. Hãy thử đoán xem index đó có giúp được truy vấn của bạn không, rồi dùng <code>EXPLAIN</code> để kiểm tra.</p>
+
+<h2>Index có giá</h2>
+<ul>
+  <li><strong>Ghi chậm hơn:</strong> mỗi <code>INSERT</code>, mỗi <code>UPDATE</code> cột có index đều phải cập nhật cả cây index.</li>
+  <li><strong>Tốn chỗ:</strong> mỗi index là một cấu trúc dữ liệu riêng trên đĩa.</li>
+  <li><strong>Không phải lúc nào cũng được dùng:</strong> với bảng nhỏ, hoặc khi điều kiện khớp phần lớn bảng, quét tuần tự lại nhanh hơn, và Postgres tự chọn như vậy.</li>
+</ul>
+<p>Những trường hợp index B-tree thường không được dùng:</p>
+<div class="tbl"><table>
+  <thead><tr><th>Viết</th><th>Vì sao</th></tr></thead>
+  <tbody>
+    <tr><td><code>WHERE name LIKE '%An'</code></td><td>Ký tự đầu không biết trước, cây đã sắp xếp không giúp gì</td></tr>
+    <tr><td><code>WHERE lower(name) = 'an'</code></td><td>Index trên <code>name</code>, không phải trên <code>lower(name)</code>. Cần tạo index trên đúng biểu thức đó</td></tr>
+    <tr><td><code>WHERE billing_month = ...</code> với index <code>(class_id, billing_month)</code></td><td>Không lọc theo cột đầu tiên của index</td></tr>
+  </tbody>
+</table></div>
+
+<h2>Nên tạo index cho cột nào</h2>
+<ol class="list">
+  <li>Cột khoá ngoại hay dùng để <code>JOIN</code> hoặc lọc, như <code>payments.invoice_id</code>, <code>classes.teacher_id</code>. Postgres không tự tạo index cho khoá ngoại.</li>
+  <li>Cột xuất hiện trong <code>WHERE</code> của truy vấn chạy thường xuyên, sau khi <code>EXPLAIN ANALYZE</code> cho thấy nó chậm.</li>
+  <li>Không tạo "cho chắc" trên mọi cột. Đo trước, tạo sau.</li>
+</ol>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"Truy vấn chậm thì cứ thêm index cho mọi cột trong WHERE."</span><span class="fix">Đo bằng EXPLAIN ANALYZE trước. Index thừa làm chậm mọi lệnh ghi mà không giúp gì cho việc đọc.</span></p>
+  <p><span class="wrong">"Có index rồi mà vẫn Seq Scan, chắc Postgres bị lỗi."</span><span class="fix">Thường là Postgres đúng: bảng còn nhỏ, hoặc điều kiện khớp quá nhiều dòng. Thử lại với dữ liệu lớn hơn và chạy ANALYZE.</span></p>
+  <p><span class="wrong">"Khoá ngoại tự có index."</span><span class="fix">Chỉ PRIMARY KEY và UNIQUE có index tự động. Cột khoá ngoại phải tự tạo.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Index là gì, đánh đổi những gì?</summary><div><p>Index là một cấu trúc dữ liệu phụ, phổ biến nhất là B-tree, sắp xếp giá trị của một hay nhiều cột và trỏ tới dòng tương ứng, nhờ đó tìm kiếm không phải quét cả bảng. Đổi lại, mỗi lệnh ghi phải cập nhật thêm index, và index tốn dung lượng. Vì vậy chỉ tạo index cho cột thực sự được tìm kiếm thường xuyên.</p></div></details>
+  <details><summary>Bạn xử lý một truy vấn chậm thế nào?</summary><div><p>Tôi chạy EXPLAIN ANALYZE để xem kế hoạch thực tế: có quét tuần tự trên bảng lớn không, số dòng dự đoán có lệch xa số dòng thật không, bước nào chiếm nhiều thời gian nhất. Sau đó tôi thử thay đổi: thêm index phù hợp, viết lại truy vấn, hoặc cập nhật thống kê bằng ANALYZE. Rồi tôi đo lại để chắc thay đổi có tác dụng.</p></div></details>
+  <details><summary>Index trên (a, b) dùng được cho những truy vấn nào?</summary><div><p>Dùng được cho truy vấn lọc theo a, hoặc theo a và b, và cho sắp xếp theo a rồi b. Thường không dùng được cho truy vấn chỉ lọc theo b, vì index sắp theo a trước, các giá trị b nằm rải rác khắp cây. Vì vậy cột hay được lọc bằng phép bằng nhất nên đặt đầu tiên.</p></div></details>
+</div>

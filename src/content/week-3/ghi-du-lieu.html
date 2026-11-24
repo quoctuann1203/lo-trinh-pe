@@ -1,0 +1,66 @@
+<h2>INSERT: thêm dòng</h2>
+<pre><code>INSERT INTO books (title, author, year, price)
+VALUES ('Chí Phèo', 'Nam Cao', 1941, 45000)
+RETURNING id, created_at;</code></pre>
+<p>Luôn liệt kê tên cột. Viết <code>INSERT INTO books VALUES (...)</code> không có tên cột thì câu lệnh phụ thuộc vào thứ tự cột trong bảng, và sẽ hỏng âm thầm khi có người thêm cột mới.</p>
+<p>Cột không được nhắc tới sẽ nhận giá trị <code>DEFAULT</code> của nó, hoặc <code>NULL</code> nếu không có default. Ở đây <code>id</code> do identity sinh ra, <code>tags</code> là mảng rỗng, <code>created_at</code> là thời điểm hiện tại.</p>
+
+<h3>RETURNING: lấy lại kết quả ngay trong một lệnh</h3>
+<p><code>RETURNING</code> là của riêng Postgres. Nó trả về các dòng vừa bị thêm, sửa hoặc xoá, như một câu <code>SELECT</code>. API sách cần trả cuốn sách vừa tạo kèm <code>id</code>, nên đây đúng là thứ bạn sẽ dùng ở tuần 5. Không có nó, bạn phải chạy thêm một câu <code>SELECT</code>, và giữa hai câu có thể có người khác đã sửa dòng đó.</p>
+
+<h2>UPDATE: sửa dòng</h2>
+<pre><code>UPDATE books
+SET price = price - 5000, tags = array_append(tags, 'giảm giá')
+WHERE id = 3
+RETURNING id, title, price, tags;</code></pre>
+<p>Chỉ những cột có trong <code>SET</code> bị đổi. Đây đúng là ngữ nghĩa của <code>PATCH</code> ở tuần 1: đổi <code>title</code> thì <code>tags</code> vẫn giữ nguyên.</p>
+<p>Nếu <code>WHERE</code> không khớp dòng nào, câu lệnh vẫn chạy thành công và báo <code>UPDATE 0</code>. Code API phải tự kiểm tra con số đó để trả 404.</p>
+
+<h2>DELETE: xoá dòng</h2>
+<pre><code>DELETE FROM books WHERE id = 3 RETURNING title;</code></pre>
+<p>Với dữ liệu quan trọng như hoá đơn, sản phẩm thật thường không xoá hẳn mà đánh dấu: thêm cột <code>deleted_at timestamptz</code> và lọc <code>WHERE deleted_at IS NULL</code> khi đọc. Cách này gọi là xoá mềm (soft delete). Tuần này cứ dùng <code>DELETE</code> thật cho bảng sách.</p>
+
+<h2>Quên WHERE: lỗi đắt nhất của người mới</h2>
+<pre><code>UPDATE books SET price = 0;    -- mọi cuốn sách giờ đều miễn phí
+DELETE FROM books;             -- bảng trống trơn</code></pre>
+<p>Database không hỏi lại. Trên máy mình thì nạp lại file seed là xong, trên database thật thì đó là sự cố. Hai thói quen bảo vệ bạn:</p>
+<ol class="list">
+  <li><strong>Chạy SELECT trước.</strong> Viết <code>SELECT * FROM books WHERE ...</code>, xem đúng các dòng định sửa, rồi mới đổi chữ <code>SELECT *</code> thành <code>UPDATE ... SET</code> hay <code>DELETE</code>, giữ nguyên <code>WHERE</code>.</li>
+  <li><strong>Bọc trong transaction.</strong> Trong <code>psql</code>, mọi thứ giữa <code>BEGIN</code> và <code>COMMIT</code> chưa có hiệu lực thật. Thấy sai thì <code>ROLLBACK</code>.</li>
+</ol>
+<pre><code>BEGIN;
+UPDATE books SET price = 0;        -- UPDATE 20: ối, cả 20 cuốn
+SELECT title, price FROM books;    -- trong transaction này thấy giá 0
+ROLLBACK;                          -- huỷ hết
+SELECT title, price FROM books;    -- giá cũ đã trở lại</code></pre>
+<p>Hôm Thứ Ba, hãy cố ý chạy đúng đoạn này một lần. Cảm giác thấy <code>UPDATE 20</code> và được cứu bởi <code>ROLLBACK</code> giúp bạn nhớ lâu hơn mọi lời dặn.</p>
+
+<h2>UPSERT: thêm hoặc cập nhật</h2>
+<p>Khi một cột có ràng buộc <code>UNIQUE</code>, bạn có thể nói "thêm mới, nếu đã có thì sửa":</p>
+<pre><code>INSERT INTO books (isbn, title, price) VALUES ('978-0132350884', 'Clean Code', 320000)
+ON CONFLICT (isbn) DO UPDATE SET price = EXCLUDED.price
+RETURNING id, price;</code></pre>
+<p><code>EXCLUDED</code> là dòng bạn vừa định chèn. Bảng sách hôm nay chưa có cột <code>isbn</code>; bạn sẽ thêm nó cùng ràng buộc <code>UNIQUE</code> hôm Thứ Năm, khi đó hãy quay lại chạy thử câu này.</p>
+
+<h2>Đừng bao giờ ghép chuỗi để tạo SQL</h2>
+<p>Ghi chú cho tuần 5, khi code TypeScript gửi SQL:</p>
+<pre><code>// Sai: người dùng gửi title là  '); DROP TABLE books; --
+await db.query(`INSERT INTO books (title) VALUES ('${title}')`);
+
+// Đúng: giá trị gửi riêng, database không bao giờ coi nó là code SQL
+await db.query('INSERT INTO books (title) VALUES ($1)', [title]);</code></pre>
+<p>Lỗi ở dòng đầu gọi là SQL injection. Nó vẫn nằm trong nhóm lỗi bảo mật phổ biến nhất, dù cách phòng rất đơn giản: luôn dùng tham số.</p>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"UPDATE chạy không báo lỗi nghĩa là đã sửa được dòng đó."</span><span class="fix">Chưa chắc. Không khớp dòng nào vẫn là thành công, với UPDATE 0. Phải kiểm tra số dòng bị ảnh hưởng.</span></p>
+  <p><span class="wrong">"Thêm xong thì SELECT lại theo tên để lấy id."</span><span class="fix">Dùng RETURNING id. Hai sách có thể trùng tên, và giữa hai câu lệnh dữ liệu có thể đã đổi.</span></p>
+  <p><span class="wrong">"Đã escape dấu nháy rồi thì ghép chuỗi vào SQL vẫn an toàn."</span><span class="fix">Tự escape rất dễ sót. Câu truy vấn có tham số là cách duy nhất nên dùng.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Bạn sẽ làm gì trước khi chạy một câu UPDATE trên database thật?</summary><div><p>Chạy câu SELECT với đúng mệnh đề WHERE đó để xem số dòng và nội dung sẽ bị sửa. Chạy UPDATE trong transaction, kiểm tra số dòng bị ảnh hưởng có khớp dự đoán không, rồi mới COMMIT. Nếu sửa nhiều dòng thì chắc chắn có bản sao lưu gần nhất, và tốt nhất là có người thứ hai xem lại câu lệnh.</p></div></details>
+  <details><summary>SQL injection là gì và phòng thế nào?</summary><div><p>Là khi dữ liệu người dùng được ghép thẳng vào chuỗi SQL, nên người dùng có thể chèn thêm lệnh SQL của họ, ví dụ đọc bảng khác hay xoá dữ liệu. Phòng bằng câu truy vấn có tham số: câu SQL và giá trị được gửi riêng, database không bao giờ hiểu giá trị là code. ORM và query builder cũng làm như vậy bên dưới.</p></div></details>
+  <details><summary>Xoá mềm và xoá cứng khác nhau thế nào, khi nào dùng cái nào?</summary><div><p>Xoá cứng là DELETE thật, dòng biến mất. Xoá mềm là đánh dấu bằng cột như deleted_at và lọc đi khi đọc. Xoá mềm hợp với dữ liệu cần lịch sử hoặc cần khôi phục như hoá đơn, đơn hàng. Đổi lại, mọi truy vấn phải nhớ lọc, và ràng buộc UNIQUE phải tính tới các dòng đã xoá. Với dữ liệu cá nhân mà người dùng yêu cầu xoá, thường phải xoá cứng.</p></div></details>
+</div>

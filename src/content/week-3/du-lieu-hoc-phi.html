@@ -1,0 +1,160 @@
+<h2>Bắt đầu từ câu hỏi</h2>
+<p>Đừng mở trình soạn thảo và gõ <code>CREATE TABLE</code> ngay. Mở ghi chép 10 cuộc phỏng vấn tuần 2, và viết ra những câu giáo viên cần trả lời mỗi tháng. Ví dụ:</p>
+<ol class="list">
+  <li>Tháng này những học sinh nào chưa đóng đủ tiền, còn thiếu bao nhiêu?</li>
+  <li>Tháng này tôi đã thu được bao nhiêu, còn phải thu bao nhiêu, theo từng lớp?</li>
+  <li>Học sinh này đã đóng những tháng nào, vào ngày nào?</li>
+  <li>Phụ huynh nào nợ từ hai tháng trở lên?</li>
+  <li>Học sinh nào đang học mà chưa có hoá đơn tháng này?</li>
+</ol>
+<p>Danh sách của bạn có thể khác, và nên khác: nó phải đến từ những gì giáo viên thật đã nói. Mỗi câu hỏi sẽ thành một truy vấn. Nếu một câu không viết được thành truy vấn đơn giản, schema đang thiếu gì đó.</p>
+
+<h2>Từ câu hỏi ra bảng</h2>
+<p>Gạch chân danh từ trong các câu hỏi: giáo viên, lớp, học sinh, hoá đơn, khoản đóng. Mỗi danh từ là ứng viên cho một bảng. Rồi hỏi về quan hệ giữa chúng:</p>
+<div class="tbl"><table>
+  <thead><tr><th>Quan hệ</th><th>Loại</th><th>Cách lưu</th></tr></thead>
+  <tbody>
+    <tr><td>Một giáo viên dạy nhiều lớp</td><td>Một nhiều</td><td><code>classes.teacher_id</code></td></tr>
+    <tr><td>Một học sinh học nhiều lớp, một lớp có nhiều học sinh</td><td>Nhiều nhiều</td><td>Bảng nối <code>enrollments</code></td></tr>
+    <tr><td>Mỗi tháng, mỗi học sinh trong mỗi lớp có một hoá đơn</td><td>Một nhiều từ <code>enrollments</code></td><td><code>invoices</code> với <code>UNIQUE</code> theo lớp, học sinh, tháng</td></tr>
+    <tr><td>Một hoá đơn có thể được trả nhiều lần</td><td>Một nhiều</td><td><code>payments.invoice_id</code></td></tr>
+  </tbody>
+</table></div>
+<p>Vì sao tách <code>payments</code> khỏi <code>invoices</code> thay vì thêm cột <code>paid boolean</code>? Vì phỏng vấn cho thấy phụ huynh hay đóng làm hai lần, hoặc đóng thiếu. Một cột đúng/sai không lưu được "đã đóng 300.000 trên 800.000".</p>
+
+<h2>Schema</h2>
+<pre><code>-- tuition/schema.sql
+DROP TABLE IF EXISTS payments, invoices, enrollments, students, classes, teachers;
+
+CREATE TABLE teachers (
+  id    bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  name  text NOT NULL,
+  phone text NOT NULL UNIQUE
+);
+
+CREATE TABLE classes (
+  id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  teacher_id  bigint NOT NULL REFERENCES teachers (id),
+  name        text NOT NULL,
+  monthly_fee bigint NOT NULL CHECK (monthly_fee &gt; 0),      -- đồng
+  UNIQUE (teacher_id, name)
+);
+
+CREATE TABLE students (
+  id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  name         text NOT NULL,
+  parent_phone text
+);
+
+CREATE TABLE enrollments (
+  class_id   bigint NOT NULL REFERENCES classes (id),
+  student_id bigint NOT NULL REFERENCES students (id),
+  joined_on  date NOT NULL DEFAULT current_date,
+  left_on    date CHECK (left_on &gt;= joined_on),            -- NULL: đang học
+  PRIMARY KEY (class_id, student_id)
+);
+
+CREATE TABLE invoices (
+  id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  class_id      bigint NOT NULL,
+  student_id    bigint NOT NULL,
+  billing_month date NOT NULL CHECK (extract(day FROM billing_month) = 1),
+  amount        bigint NOT NULL CHECK (amount &gt; 0),
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  FOREIGN KEY (class_id, student_id) REFERENCES enrollments (class_id, student_id),
+  UNIQUE (class_id, student_id, billing_month)
+);
+
+CREATE TABLE payments (
+  id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  invoice_id bigint NOT NULL REFERENCES invoices (id),
+  amount     bigint NOT NULL CHECK (amount &gt; 0),
+  paid_at    timestamptz NOT NULL DEFAULT now()
+);</code></pre>
+<p>Ba quyết định đáng nói to lên khi bạn thu âm hôm Chủ nhật:</p>
+<ul>
+  <li><strong>Khoá ngoại hai cột</strong> từ <code>invoices</code> tới <code>enrollments</code>: không thể lập hoá đơn cho học sinh không học lớp đó.</li>
+  <li><strong>Tháng lưu bằng <code>date</code> ngày mùng 1</strong>, có <code>CHECK</code> bảo vệ. So sánh, sắp xếp, cộng tháng đều dễ, và không ai lỡ lưu "2026-03-15" cho học phí tháng 3.</li>
+  <li><strong>Hoá đơn lưu <code>amount</code> riêng</strong> thay vì luôn lấy <code>classes.monthly_fee</code>: tháng sau giáo viên tăng học phí thì hoá đơn cũ vẫn giữ đúng số đã tính. Có cả chỗ để giảm giá cho anh chị em ruột.</li>
+</ul>
+
+<h2>Dữ liệu mẫu bằng generate_series</h2>
+<p>Gõ tay 24.000 hoá đơn thì không ai làm. <code>generate_series(1, 50)</code> sinh ra 50 dòng chứa số từ 1 tới 50, và bạn dùng nó như một bảng:</p>
+<pre><code>-- tuition/seed.sql: chạy ngay sau schema.sql, trên database vừa tạo lại
+INSERT INTO teachers (name, phone)
+SELECT 'Giáo viên ' || g, '09' || lpad(g::text, 8, '0')
+FROM generate_series(1, 50) AS g;
+
+-- Mỗi giáo viên 4 lớp: 200 lớp, học phí 600.000 tới 900.000
+INSERT INTO classes (teacher_id, name, monthly_fee)
+SELECT t.id, 'Lớp ' || k, 500000 + 100000 * k
+FROM teachers t
+CROSS JOIN generate_series(1, 4) AS k;
+
+INSERT INTO students (name, parent_phone)
+SELECT 'Học sinh ' || g, '08' || lpad(g::text, 8, '0')
+FROM generate_series(1, 2000) AS g;
+
+-- Mỗi học sinh học một lớp, chia đều cho 200 lớp
+INSERT INTO enrollments (class_id, student_id, joined_on)
+SELECT (s.id - 1) % 200 + 1, s.id, date '2026-01-01'
+FROM students s;
+
+-- 12 tháng hoá đơn cho mỗi học sinh: 24.000 hoá đơn
+INSERT INTO invoices (class_id, student_id, billing_month, amount)
+SELECT e.class_id, e.student_id,
+       (date '2026-01-01' + make_interval(months =&gt; m))::date,
+       c.monthly_fee
+FROM enrollments e
+JOIN classes c ON c.id = e.class_id
+CROSS JOIN generate_series(0, 11) AS m;
+
+-- Khoảng 85% hoá đơn được trả đủ vào ngày mùng 5
+INSERT INTO payments (invoice_id, amount, paid_at)
+SELECT id, amount, billing_month + interval '4 days'
+FROM invoices
+WHERE random() &lt; 0.85;
+
+-- Khoảng 5% hoá đơn được trả một nửa
+INSERT INTO payments (invoice_id, amount, paid_at)
+SELECT i.id, i.amount / 2, i.billing_month + interval '9 days'
+FROM invoices i
+WHERE NOT EXISTS (SELECT 1 FROM payments p WHERE p.invoice_id = i.id)
+  AND random() &lt; 0.35;
+
+ANALYZE;   -- cập nhật thống kê để EXPLAIN đoán số dòng cho đúng</code></pre>
+<p><code>(s.id - 1) % 200 + 1</code> dựa vào việc id lớp chạy từ 1 tới 200, điều chỉ đúng trên database vừa tạo lại. Vì vậy schema.sql bắt đầu bằng <code>DROP TABLE</code>. Chạy cả hai bằng một lệnh:</p>
+<pre><code>cat tuition/schema.sql tuition/seed.sql | docker compose exec -T db psql -U hoc -d hoc -v ON_ERROR_STOP=1</code></pre>
+
+<h2>Câu hỏi 1 thành truy vấn</h2>
+<p>"Tháng 3 năm 2026, học sinh nào của giáo viên số 1 chưa đóng đủ, còn thiếu bao nhiêu?"</p>
+<pre><code>SELECT s.name   AS hoc_sinh,
+       c.name   AS lop,
+       i.amount AS phai_dong,
+       COALESCE(SUM(p.amount), 0)            AS da_dong,
+       i.amount - COALESCE(SUM(p.amount), 0) AS con_thieu
+FROM invoices i
+JOIN classes  c ON c.id = i.class_id
+JOIN students s ON s.id = i.student_id
+LEFT JOIN payments p ON p.invoice_id = i.id
+WHERE c.teacher_id = 1
+  AND i.billing_month = date '2026-03-01'
+GROUP BY i.id, s.name, c.name
+HAVING COALESCE(SUM(p.amount), 0) &lt; i.amount
+ORDER BY con_thieu DESC, s.name;</code></pre>
+<p>Truy vấn này dùng mọi thứ của tuần: <code>JOIN</code> để lấy tên, <code>LEFT JOIN</code> để giữ hoá đơn chưa có khoản đóng nào, <code>GROUP BY</code> để cộng các lần đóng, <code>HAVING</code> để chỉ giữ hoá đơn còn thiếu, và <code>COALESCE</code> để đổi <code>NULL</code> thành 0. <code>i.amount</code> dùng được dù không nằm trong <code>GROUP BY</code>, vì đã nhóm theo khoá chính <code>i.id</code>.</p>
+<p>Viết bốn câu còn lại theo cùng cách, mỗi câu một file trong <code>tuition/queries/</code>. Với từng câu, tự tay kiểm tra kết quả với một học sinh cụ thể: lấy id, đếm khoản đóng bằng một câu <code>SELECT</code> đơn giản, so với kết quả truy vấn lớn.</p>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"Thiết kế bảng trước, câu hỏi tính sau."</span><span class="fix">Ngược lại. Câu hỏi của người dùng quyết định bảng nào cần, cột nào cần, và quan hệ nào phải được database bảo vệ.</span></p>
+  <p><span class="wrong">"Hoá đơn chỉ cần cột paid đúng hoặc sai."</span><span class="fix">Thực tế có đóng thiếu, đóng nhiều lần, hoàn tiền. Lưu từng khoản đóng, trạng thái thì tính ra từ chúng.</span></p>
+  <p><span class="wrong">"Số tiền hoá đơn lấy từ học phí của lớp là đủ, lưu thêm là lặp dữ liệu."</span><span class="fix">Học phí đổi theo thời gian. Hoá đơn phải ghi lại số tiền tại lúc lập, không phải số tiền của hôm nay.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Bạn thiết kế schema cho một tính năng mới thế nào?</summary><div><p>Tôi bắt đầu từ những câu hỏi mà người dùng và màn hình cần trả lời, rồi rút ra các thực thể và quan hệ giữa chúng, xác định quan hệ một nhiều hay nhiều nhiều. Sau đó tôi chọn ràng buộc để database chặn những trạng thái không thể có, như hoá đơn cho học sinh không thuộc lớp. Cuối cùng tôi viết thử từng truy vấn trên dữ liệu mẫu đủ lớn để kiểm tra schema có trả lời được không và có chạy nhanh không.</p></div></details>
+  <details><summary>Quan hệ nhiều nhiều lưu thế nào?</summary><div><p>Bằng một bảng nối chứa khoá ngoại tới hai bảng, với khoá chính là cặp hai khoá đó để không lặp. Bảng nối thường mang thêm thông tin của chính quan hệ, như ngày học sinh vào lớp và ngày nghỉ.</p></div></details>
+  <details><summary>Vì sao lưu từng khoản thanh toán thay vì một cột trạng thái?</summary><div><p>Vì thanh toán ngoài đời không gọn gàng: đóng thiếu, đóng nhiều lần, hoàn tiền. Lưu từng khoản như một sổ ghi chép chỉ thêm không sửa, thì trạng thái hoá đơn luôn tính lại được và có lịch sử để đối soát khi phụ huynh thắc mắc. Nếu cần đọc nhanh, có thể lưu thêm trạng thái tính sẵn, nhưng nguồn sự thật vẫn là các khoản thanh toán.</p></div></details>
+</div>

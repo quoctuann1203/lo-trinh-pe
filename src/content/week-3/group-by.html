@@ -1,0 +1,78 @@
+<h2>Từ nhiều dòng thành một con số</h2>
+<p>Hàm tổng hợp nhận cả một nhóm dòng và trả về một giá trị. Không có <code>GROUP BY</code> thì cả bảng là một nhóm:</p>
+<pre><code>SELECT COUNT(*)        AS so_sach,
+       COUNT(author_id) AS so_sach_co_tac_gia,
+       SUM(price)       AS tong_gia,
+       ROUND(AVG(price)) AS gia_trung_binh,
+       MIN(year), MAX(year)
+FROM books;</code></pre>
+<div class="tbl"><table>
+  <thead><tr><th>Hàm</th><th>Trả về</th><th>Với NULL</th></tr></thead>
+  <tbody>
+    <tr><td><code>COUNT(*)</code></td><td>Số dòng</td><td>Đếm cả dòng có NULL</td></tr>
+    <tr><td><code>COUNT(cot)</code></td><td>Số dòng mà cột đó khác NULL</td><td>Bỏ qua NULL</td></tr>
+    <tr><td><code>COUNT(DISTINCT cot)</code></td><td>Số giá trị khác nhau</td><td>Bỏ qua NULL</td></tr>
+    <tr><td><code>SUM</code>, <code>AVG</code>, <code>MIN</code>, <code>MAX</code></td><td>Tổng, trung bình, nhỏ nhất, lớn nhất</td><td>Bỏ qua NULL. Nhóm rỗng trả <code>NULL</code>, không phải 0</td></tr>
+  </tbody>
+</table></div>
+<p><code>SUM</code> của không dòng nào là <code>NULL</code>. Khi hiển thị "tổng đã thu" cho một lớp chưa ai đóng tiền, viết <code>COALESCE(SUM(amount), 0)</code>.</p>
+
+<h2>GROUP BY: một dòng cho mỗi nhóm</h2>
+<pre><code>SELECT a.name, COUNT(b.id) AS so_sach
+FROM authors a
+LEFT JOIN books b ON b.author_id = a.id
+GROUP BY a.id, a.name
+ORDER BY so_sach DESC, a.name;</code></pre>
+<p>Quy tắc duy nhất cần nhớ: mỗi cột trong <code>SELECT</code> phải hoặc nằm trong <code>GROUP BY</code>, hoặc nằm trong một hàm tổng hợp. Lý do: một nhóm có nhiều dòng, database không biết bạn muốn lấy giá trị của dòng nào. Postgres có một ngoại lệ hợp lý: đã nhóm theo khoá chính <code>a.id</code> thì được lấy mọi cột khác của bảng <code>a</code>, vì chúng chắc chắn giống nhau trong nhóm.</p>
+<p>Để ý <code>COUNT(b.id)</code> chứ không phải <code>COUNT(*)</code>. Với <code>LEFT JOIN</code>, tác giả chưa có sách vẫn có một dòng với <code>b.id</code> là <code>NULL</code>. <code>COUNT(*)</code> đếm dòng đó thành 1, <code>COUNT(b.id)</code> bỏ qua và ra 0, đúng như ý muốn.</p>
+
+<h2>WHERE lọc dòng, HAVING lọc nhóm</h2>
+<pre><code>SELECT a.name, COUNT(*) AS so_sach_moi
+FROM books b
+JOIN authors a ON a.id = b.author_id
+WHERE b.year &gt;= 2000             -- trước khi gom: chỉ tính sách từ năm 2000
+GROUP BY a.id, a.name
+HAVING COUNT(*) &gt;= 2             -- sau khi gom: chỉ giữ tác giả có từ 2 cuốn
+ORDER BY so_sach_moi DESC;</code></pre>
+<p>Nhớ thứ tự xử lý: <code>FROM</code>, <code>WHERE</code>, <code>GROUP BY</code>, <code>HAVING</code>, <code>SELECT</code>, <code>ORDER BY</code>. Ở bước <code>WHERE</code> nhóm chưa tồn tại, nên không viết được <code>WHERE COUNT(*) &gt;= 2</code>. Ngược lại, điều kiện trên từng dòng nên đặt ở <code>WHERE</code> thay vì <code>HAVING</code>: lọc sớm thì có ít dòng phải gom hơn.</p>
+
+<h2>FILTER: nhiều phép đếm trong một lần</h2>
+<p>Postgres cho phép gắn điều kiện vào từng hàm tổng hợp. Rất hợp cho báo cáo dạng "mỗi lớp có bao nhiêu hoá đơn đã trả, bao nhiêu chưa":</p>
+<pre><code>SELECT b.title,
+       COUNT(r.id)                             AS so_danh_gia,
+       COUNT(r.id) FILTER (WHERE r.rating &gt;= 4) AS danh_gia_tot,
+       ROUND(AVG(r.rating), 1)                 AS diem_tb
+FROM books b
+LEFT JOIN reviews r ON r.book_id = b.id
+GROUP BY b.id, b.title
+ORDER BY diem_tb DESC NULLS LAST;</code></pre>
+
+<h2>Bẫy chia số nguyên</h2>
+<pre><code>SELECT 7 / 2;                    -- 3, không phải 3.5
+SELECT 7 / 2.0;                  -- 3.5000000000000000
+SELECT ROUND(100.0 * 7 / 9, 1);  -- 77.8: tỉ lệ phần trăm</code></pre>
+<p>Hai số nguyên chia nhau thì ra số nguyên, phần lẻ bị cắt. Khi tính tỉ lệ như "phần trăm học sinh đã đóng tiền", nhân với <code>100.0</code> trước khi chia.</p>
+
+<h2>Bài luyện: 6 câu GROUP BY</h2>
+<ol class="list">
+  <li>Tổng số sách, số sách có tác giả, giá trung bình làm tròn tới đồng.</li>
+  <li>Mỗi tác giả có bao nhiêu sách, kể cả tác giả chưa có sách (phải ra 0).</li>
+  <li>Tác giả có từ 2 cuốn trở lên.</li>
+  <li>Mỗi cuốn sách: số đánh giá, số đánh giá từ 4 sao, điểm trung bình một chữ số thập phân.</li>
+  <li>Số sách theo từng thập niên: 1930, 1940... Gợi ý: <code>year / 10 * 10</code>, ở đây phép chia nguyên lại có ích.</li>
+  <li>Phần trăm sách có ít nhất một đánh giá, một chữ số thập phân.</li>
+</ol>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"COUNT(*) và COUNT(cot) như nhau."</span><span class="fix">COUNT(cot) bỏ qua NULL. Sau LEFT JOIN, chỉ COUNT(cột bên phải) mới ra 0 cho nhóm không có cặp.</span></p>
+  <p><span class="wrong">"Nhóm không có dòng nào thì SUM bằng 0."</span><span class="fix">SUM của tập rỗng là NULL. Bọc COALESCE(SUM(...), 0) khi cần số 0.</span></p>
+  <p><span class="wrong">"Điều kiện nào cũng viết vào HAVING được, cho gọn một chỗ."</span><span class="fix">Điều kiện trên từng dòng đặt ở WHERE để lọc trước khi gom. HAVING chỉ dành cho điều kiện trên nhóm.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>WHERE và HAVING khác nhau thế nào?</summary><div><p>WHERE lọc từng dòng trước khi GROUP BY gom nhóm, nên không dùng được hàm tổng hợp. HAVING lọc các nhóm sau khi gom, nên dùng được COUNT, SUM. Điều kiện nào áp được lên từng dòng thì nên đặt ở WHERE để giảm số dòng phải gom.</p></div></details>
+  <details><summary>COUNT(*), COUNT(cot) và COUNT(DISTINCT cot) khác nhau thế nào?</summary><div><p>COUNT(*) đếm số dòng. COUNT(cot) đếm số dòng mà cột đó không NULL. COUNT(DISTINCT cot) đếm số giá trị khác nhau, không tính NULL. Sau LEFT JOIN, muốn đếm số dòng con thì phải dùng COUNT của một cột bên phải, vì COUNT(*) sẽ đếm cả dòng NULL do JOIN tạo ra.</p></div></details>
+  <details><summary>Vì sao tổng tiền sai sau khi JOIN thêm một bảng?</summary><div><p>Vì JOIN với quan hệ một nhiều nhân bản các dòng bên một. Cộng một cột của bên một sau phép nối sẽ cộng lặp. Cách sửa là tổng hợp riêng từng bảng trong truy vấn con hoặc CTE rồi mới nối, hoặc đảm bảo mỗi dòng kết quả đại diện đúng cho thứ mình đang cộng.</p></div></details>
+</div>

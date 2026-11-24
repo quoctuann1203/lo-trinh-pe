@@ -1,0 +1,86 @@
+<h2>Vì sao tách bảng</h2>
+<p>Nếu bảng <code>books</code> lưu thẳng tên tác giả, tên "Nam Cao" sẽ lặp lại ở mọi cuốn của ông. Sửa một lỗi chính tả là phải sửa nhiều dòng, sót một dòng là dữ liệu tự mâu thuẫn. Tách ra bảng <code>authors</code>, mỗi sự thật chỉ nằm ở một chỗ, và <code>books.author_id</code> trỏ tới đó. Việc tách này gọi là chuẩn hoá (normalization). <code>JOIN</code> là cái giá phải trả khi đọc: ghép các bảng lại.</p>
+
+<h2>JOIN chạy thế nào</h2>
+<p>Hình dung: với mỗi dòng ở bảng bên trái, database tìm mọi dòng ở bảng bên phải thoả điều kiện <code>ON</code>, và ghép từng cặp thành một dòng kết quả.</p>
+<pre><code>SELECT b.title, a.name AS author
+FROM books b
+JOIN authors a ON a.id = b.author_id
+ORDER BY b.title;</code></pre>
+<p><code>b</code> và <code>a</code> là tên viết tắt của bảng. Khi đã nối nhiều bảng, luôn ghi rõ cột thuộc bảng nào, kể cả khi tên cột không trùng. Người đọc sau sẽ cảm ơn bạn.</p>
+
+<h3>Bốn loại JOIN</h3>
+<div class="tbl"><table>
+  <thead><tr><th>Loại</th><th>Giữ lại</th><th>Ví dụ</th></tr></thead>
+  <tbody>
+    <tr><td><code>JOIN</code> (tức <code>INNER JOIN</code>)</td><td>Chỉ các cặp khớp nhau</td><td>Sách có tác giả. Sách chưa rõ tác giả biến mất</td></tr>
+    <tr><td><code>LEFT JOIN</code></td><td>Mọi dòng bên trái, bên phải không khớp thì điền <code>NULL</code></td><td>Mọi sách, tác giả để trống nếu chưa rõ</td></tr>
+    <tr><td><code>RIGHT JOIN</code></td><td>Mọi dòng bên phải</td><td>Hiếm khi dùng. Đổi chỗ hai bảng rồi dùng <code>LEFT JOIN</code> cho dễ đọc</td></tr>
+    <tr><td><code>FULL JOIN</code></td><td>Mọi dòng ở cả hai bên</td><td>Đối chiếu hai danh sách, như sao kê ngân hàng với hoá đơn</td></tr>
+  </tbody>
+</table></div>
+<pre><code>-- Mọi cuốn sách, kể cả sách chưa rõ tác giả
+SELECT b.title, COALESCE(a.name, 'Chưa rõ') AS author
+FROM books b
+LEFT JOIN authors a ON a.id = b.author_id;</code></pre>
+
+<h2>Tìm dòng không có cặp</h2>
+<p>Câu hỏi dạng "tác giả nào chưa có sách", "học sinh nào chưa có hoá đơn tháng này" xuất hiện liên tục trong sản phẩm thật. Có hai cách viết đúng:</p>
+<pre><code>-- Cách 1: LEFT JOIN rồi giữ dòng không khớp
+SELECT a.name
+FROM authors a
+LEFT JOIN books b ON b.author_id = a.id
+WHERE b.id IS NULL;
+
+-- Cách 2: NOT EXISTS, đọc gần với câu hỏi hơn
+SELECT a.name
+FROM authors a
+WHERE NOT EXISTS (SELECT 1 FROM books b WHERE b.author_id = a.id);</code></pre>
+<p>Và một cách viết trông đúng nhưng sai:</p>
+<pre><code>SELECT name FROM authors
+WHERE id NOT IN (SELECT author_id FROM books);   -- 0 dòng!</code></pre>
+<p>Chỉ cần một cuốn sách có <code>author_id</code> là <code>NULL</code>, <code>NOT IN</code> trả về 0 dòng. Lý do: <code>id NOT IN (1, 2, NULL)</code> nghĩa là <code>id &lt;&gt; 1 AND id &lt;&gt; 2 AND id &lt;&gt; NULL</code>, mà <code>id &lt;&gt; NULL</code> luôn là chưa biết. Schema của bạn cho phép <code>author_id</code> là <code>NULL</code>, nên hãy chạy thử để thấy tận mắt. Quy tắc: dùng <code>NOT EXISTS</code>, đừng dùng <code>NOT IN</code> với truy vấn con.</p>
+
+<h2>Điều kiện đặt ở ON hay ở WHERE</h2>
+<p>Với <code>JOIN</code> thường thì như nhau. Với <code>LEFT JOIN</code> thì khác hẳn:</p>
+<pre><code>-- Mọi sách, kèm các đánh giá 5 sao nếu có
+SELECT b.title, r.rating
+FROM books b
+LEFT JOIN reviews r ON r.book_id = b.id AND r.rating = 5;
+
+-- Chỉ những sách CÓ đánh giá 5 sao. LEFT JOIN đã thành JOIN thường
+SELECT b.title, r.rating
+FROM books b
+LEFT JOIN reviews r ON r.book_id = b.id
+WHERE r.rating = 5;</code></pre>
+<p>Ở câu thứ hai, sách không có đánh giá có <code>r.rating</code> là <code>NULL</code>, <code>NULL = 5</code> là chưa biết, nên <code>WHERE</code> loại chúng đi. Điều kiện lọc bảng bên phải của <code>LEFT JOIN</code> phải đặt trong <code>ON</code>.</p>
+
+<h2>JOIN nhân bản dòng</h2>
+<p>Một cuốn sách có 3 đánh giá thì sau khi <code>JOIN reviews</code> nó xuất hiện 3 lần. Cộng giá sách sau phép nối đó là cộng 3 lần:</p>
+<pre><code>-- Sai: tổng giá bị nhân lên theo số đánh giá
+SELECT SUM(b.price) FROM books b JOIN reviews r ON r.book_id = b.id;</code></pre>
+<p>Trước khi viết hàm tổng hợp sau một <code>JOIN</code>, luôn tự hỏi: mỗi dòng kết quả bây giờ đại diện cho cái gì? Một cuốn sách, hay một đánh giá?</p>
+
+<h2>Bài luyện: 6 câu JOIN</h2>
+<ol class="list">
+  <li>Tên sách và tên tác giả, chỉ những sách có tác giả.</li>
+  <li>Mọi sách, tác giả hiện "Chưa rõ" nếu chưa có.</li>
+  <li>Các tác giả chưa có cuốn sách nào. Viết cả hai cách, rồi thử thêm cách <code>NOT IN</code> và giải thích kết quả.</li>
+  <li>Tên sách, điểm và nội dung của mọi đánh giá, sắp theo sách rồi theo điểm giảm dần.</li>
+  <li>Mọi sách, kèm đánh giá 1 sao nếu có. Sách không có đánh giá 1 sao vẫn phải xuất hiện.</li>
+  <li>Tên tác giả và tên sách của mọi đánh giá 5 sao: nối ba bảng.</li>
+</ol>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"WHERE id NOT IN (SELECT ...) là cách tìm dòng không có cặp."</span><span class="fix">Chỉ cần truy vấn con có một NULL là ra 0 dòng. Dùng NOT EXISTS.</span></p>
+  <p><span class="wrong">"Thêm điều kiện vào WHERE sau LEFT JOIN để lọc bảng bên phải."</span><span class="fix">Làm vậy là biến LEFT JOIN thành JOIN thường. Đặt điều kiện đó vào ON.</span></p>
+  <p><span class="wrong">"Postgres tự tạo index cho khoá ngoại."</span><span class="fix">Không. Postgres chỉ tự tạo index cho PRIMARY KEY và UNIQUE. Cột khoá ngoại hay dùng để JOIN thì phải tự tạo index.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>INNER JOIN và LEFT JOIN khác nhau thế nào?</summary><div><p>INNER JOIN chỉ giữ các cặp dòng thoả điều kiện ON ở cả hai bảng. LEFT JOIN giữ mọi dòng của bảng bên trái, dòng nào không có cặp thì các cột bên phải là NULL. Ví dụ liệt kê mọi học sinh kèm hoá đơn tháng này thì dùng LEFT JOIN, để thấy cả học sinh chưa có hoá đơn.</p></div></details>
+  <details><summary>Tìm các dòng không có dòng tương ứng ở bảng khác thế nào?</summary><div><p>Dùng NOT EXISTS với truy vấn con có liên kết, hoặc LEFT JOIN rồi lọc WHERE khoá bên phải IS NULL. Tránh NOT IN với truy vấn con, vì nếu truy vấn con trả về một giá trị NULL thì toàn bộ điều kiện thành chưa biết và kết quả rỗng.</p></div></details>
+  <details><summary>Chuẩn hoá là gì, có khi nào nên phi chuẩn hoá?</summary><div><p>Chuẩn hoá là tách dữ liệu để mỗi sự thật chỉ lưu ở một chỗ, tránh dữ liệu mâu thuẫn khi cập nhật. Phi chuẩn hoá là cố ý lưu lặp để đọc nhanh hơn hoặc giữ lịch sử. Ví dụ hoá đơn nên lưu số tiền tại thời điểm lập, dù học phí của lớp có thể đổi sau đó. Đó không phải lặp dữ liệu mà là ghi lại một sự thật khác: số tiền đã tính cho tháng đó.</p></div></details>
+</div>

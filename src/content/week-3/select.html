@@ -1,0 +1,81 @@
+<h2>Cấu trúc một câu SELECT</h2>
+<pre><code>SELECT title, price           -- 5. lấy những cột nào
+FROM books                    -- 1. từ bảng nào
+WHERE price &lt; 100000          -- 2. giữ dòng nào
+ORDER BY price DESC, title    -- 6. sắp xếp thế nào
+LIMIT 5 OFFSET 0;             -- 7. lấy bao nhiêu dòng</code></pre>
+<p>Bạn viết theo thứ tự <code>SELECT ... FROM ... WHERE</code>, nhưng database xử lý theo thứ tự khác, đánh số ở comment bên trên. Bước 3 và 4 là <code>GROUP BY</code> và <code>HAVING</code>, bạn sẽ học hôm Thứ Năm. Thứ tự này giải thích nhiều lỗi khó hiểu:</p>
+<ul>
+  <li>Không dùng được tên viết tắt <code>AS</code> của cột trong <code>WHERE</code>, vì <code>WHERE</code> chạy trước <code>SELECT</code>.</li>
+  <li>Dùng được tên viết tắt đó trong <code>ORDER BY</code>, vì <code>ORDER BY</code> chạy sau.</li>
+</ul>
+<pre><code>SELECT title, price * 1.1 AS gia_moi FROM books WHERE gia_moi &gt; 100000;   -- lỗi: column "gia_moi" does not exist
+SELECT title, price * 1.1 AS gia_moi FROM books ORDER BY gia_moi DESC;     -- chạy được</code></pre>
+
+<h2>Lọc dòng với WHERE</h2>
+<div class="tbl"><table>
+  <thead><tr><th>Viết</th><th>Nghĩa</th></tr></thead>
+  <tbody>
+    <tr><td><code>price BETWEEN 50000 AND 100000</code></td><td>Từ 50.000 tới 100.000, tính cả hai đầu</td></tr>
+    <tr><td><code>author IN ('Tô Hoài', 'Nam Cao')</code></td><td>Bằng một trong các giá trị</td></tr>
+    <tr><td><code>title LIKE 'Dế%'</code></td><td>Bắt đầu bằng "Dế". <code>%</code> là chuỗi bất kỳ, <code>_</code> là đúng một ký tự</td></tr>
+    <tr><td><code>title ILIKE '%code%'</code></td><td>Chứa "code", không phân biệt hoa thường. <code>ILIKE</code> là của riêng Postgres</td></tr>
+    <tr><td><code>'lập trình' = ANY(tags)</code></td><td>Mảng <code>tags</code> có chứa phần tử này</td></tr>
+    <tr><td><code>author IS NULL</code></td><td>Chưa biết tác giả</td></tr>
+  </tbody>
+</table></div>
+<p>Chuỗi luôn đặt trong nháy đơn. Nháy kép trong Postgres dành cho tên bảng, tên cột: <code>"title"</code> là cột title, còn <code>'title'</code> là chuỗi chữ "title".</p>
+<p><code>AND</code> được ưu tiên hơn <code>OR</code>, giống phép nhân được ưu tiên hơn phép cộng. Khi trộn hai loại, luôn đặt ngoặc:</p>
+<pre><code>-- Ý định: sách của Tô Hoài hoặc Nam Cao, giá dưới 100.000
+WHERE author = 'Tô Hoài' OR author = 'Nam Cao' AND price &lt; 100000     -- sai: sách Tô Hoài giá nào cũng lọt
+WHERE (author = 'Tô Hoài' OR author = 'Nam Cao') AND price &lt; 100000   -- đúng</code></pre>
+
+<h2>NULL nghĩa là "không biết"</h2>
+<p><code>NULL</code> không phải số 0, không phải chuỗi rỗng. Nó nghĩa là giá trị chưa biết. Mọi phép so sánh với một giá trị chưa biết đều cho kết quả chưa biết:</p>
+<pre><code>SELECT NULL = NULL;     -- NULL, không phải true
+SELECT NULL &lt;&gt; 5;       -- NULL
+SELECT NULL + 1;        -- NULL</code></pre>
+<p><code>WHERE</code> chỉ giữ dòng có điều kiện là <code>true</code>. Dòng có điều kiện là <code>false</code> hoặc <code>NULL</code> đều bị loại. Vì vậy:</p>
+<pre><code>SELECT * FROM books WHERE author = NULL;       -- 0 dòng, luôn luôn
+SELECT * FROM books WHERE author IS NULL;      -- đúng cách
+SELECT * FROM books WHERE author &lt;&gt; 'Tô Hoài'; -- KHÔNG có các sách author là NULL
+SELECT * FROM books WHERE author IS DISTINCT FROM 'Tô Hoài'; -- có cả sách author là NULL</code></pre>
+<p>Hai hàm hay dùng với <code>NULL</code>: <code>COALESCE(author, 'Chưa rõ')</code> lấy giá trị đầu tiên không phải <code>NULL</code>, và <code>NULLIF(a, b)</code> trả <code>NULL</code> nếu <code>a = b</code>.</p>
+
+<h2>Sắp xếp và phân trang</h2>
+<p>Không có <code>ORDER BY</code> thì thứ tự dòng trả về là không xác định. Hôm nay có vẻ theo id, mai sau một lần <code>UPDATE</code> có thể khác. Muốn thứ tự ổn định, luôn sắp theo một cột duy nhất ở cuối:</p>
+<pre><code>SELECT id, title, price FROM books
+ORDER BY price DESC, id      -- id phá thế hoà khi hai sách cùng giá
+LIMIT 10 OFFSET 20;          -- trang 3, mỗi trang 10 cuốn</code></pre>
+<p>Khi sắp tăng dần, Postgres đặt <code>NULL</code> ở cuối. Muốn khác thì viết rõ <code>ORDER BY year NULLS FIRST</code>.</p>
+
+<h2>Bài luyện: 12 câu SELECT</h2>
+<p>Với mỗi câu, ghi dự đoán số dòng vào file trước khi chạy. Sai dự đoán là lúc học được nhiều nhất.</p>
+<ol class="list">
+  <li>Tất cả sách, sắp theo tên.</li>
+  <li>Năm cuốn đắt nhất.</li>
+  <li>Sách giá từ 50.000 đến 100.000.</li>
+  <li>Sách xuất bản trước năm 1950.</li>
+  <li>Sách chưa biết tác giả.</li>
+  <li>Sách mà tác giả không phải Tô Hoài, tính cả sách chưa biết tác giả.</li>
+  <li>Sách có chữ "code" trong tên, không phân biệt hoa thường.</li>
+  <li>Sách có tag "lập trình".</li>
+  <li>Tên sách và giá sau khi giảm 20%, đặt tên cột là <code>gia_giam</code>, sắp theo cột đó.</li>
+  <li>Tên sách và tác giả, tác giả <code>NULL</code> thì hiện "Chưa rõ".</li>
+  <li>Trang 2 của danh sách sách sắp theo năm mới nhất, mỗi trang 5 cuốn.</li>
+  <li>Các tác giả khác nhau, mỗi người một dòng. Gợi ý: <code>SELECT DISTINCT</code>.</li>
+</ol>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"Muốn tìm dòng chưa có giá trị thì viết WHERE cot = NULL."</span><span class="fix">Luôn ra 0 dòng. Phải viết IS NULL.</span></p>
+  <p><span class="wrong">"Không cần ORDER BY, database trả theo thứ tự chèn vào."</span><span class="fix">Không có gì đảm bảo điều đó. Không có ORDER BY thì thứ tự là ngẫu nhiên về mặt ý nghĩa.</span></p>
+  <p><span class="wrong">"SELECT * cho tiện, lấy thừa cũng không sao."</span><span class="fix">Trong code thật, liệt kê đúng cột cần. Bảng thêm cột lớn là truy vấn chậm đi, và lộ cả dữ liệu không nên trả ra API.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Thứ tự xử lý logic của một câu SELECT là gì?</summary><div><p>FROM và JOIN, rồi WHERE, GROUP BY, HAVING, SELECT, DISTINCT, ORDER BY, cuối cùng là LIMIT và OFFSET. Vì vậy alias đặt trong SELECT dùng được ở ORDER BY nhưng không dùng được ở WHERE.</p></div></details>
+  <details><summary>Vì sao <code>WHERE x = NULL</code> không bao giờ trả dòng nào?</summary><div><p>Vì SQL dùng logic ba giá trị: true, false và unknown. So sánh bất cứ thứ gì với NULL đều cho unknown, và WHERE chỉ giữ dòng có điều kiện là true. Muốn kiểm tra NULL phải dùng IS NULL hoặc IS DISTINCT FROM.</p></div></details>
+  <details><summary>Phân trang bằng OFFSET có vấn đề gì?</summary><div><p>Database vẫn phải đọc và bỏ qua tất cả các dòng trước OFFSET, nên trang càng sâu càng chậm. Nếu có dòng mới chèn vào giữa hai lần tải trang, người dùng sẽ thấy một dòng lặp lại hoặc bị sót. Với danh sách dài, dùng phân trang theo con trỏ: <code>WHERE id &gt; id_cuoi_trang_truoc ORDER BY id LIMIT 10</code>.</p></div></details>
+</div>
