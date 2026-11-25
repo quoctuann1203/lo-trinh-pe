@@ -1,0 +1,113 @@
+<h2>Sổ thu tiền phẳng: nơi mọi rắc rối bắt đầu</h2>
+<p>Nhiều giáo viên bạn phỏng vấn ở tuần 2 đang dùng một bảng tính kiểu này. Mỗi lần phụ huynh đóng tiền là thêm một dòng:</p>
+<div class="tbl"><table>
+  <thead><tr><th>ngay_dong</th><th>hoc_sinh</th><th>sdt_phu_huynh</th><th>lop</th><th>giao_vien</th><th>sdt_giao_vien</th><th>hoc_phi_lop</th><th>thang</th><th>phai_dong</th><th>da_dong</th><th>ghi_chu</th></tr></thead>
+  <tbody>
+    <tr><td>05/03</td><td>An</td><td>0901…</td><td>Toán 6A</td><td>cô Lan</td><td>0912…</td><td>800.000</td><td>3/2026</td><td>800.000</td><td>300.000</td><td>đóng trước</td></tr>
+    <tr><td>12/03</td><td>An</td><td>0901…</td><td>Toán 6A</td><td>cô Lan</td><td>0912…</td><td>800.000</td><td>3/2026</td><td>800.000</td><td>500.000</td><td></td></tr>
+    <tr><td>06/03</td><td>Bình</td><td>0903…</td><td>Toán 6A</td><td>cô Lan</td><td>0912…</td><td>800.000</td><td>3/2026</td><td>800.000</td><td>800.000</td><td></td></tr>
+  </tbody>
+</table></div>
+<p>Nó chạy được, cho tới khi có thứ cần thay đổi. Tên "cô Lan" và số điện thoại của cô lặp lại ở mọi dòng của mọi lớp cô dạy. Mỗi chỗ lặp là một chỗ có thể lệch nhau. Có ba kiểu lỗi kinh điển, gọi là các bất thường (anomaly):</p>
+<div class="tbl"><table>
+  <thead><tr><th>Bất thường</th><th>Ví dụ trong sổ</th></tr></thead>
+  <tbody>
+    <tr><td>Khi sửa</td><td>Cô Lan đổi số điện thoại. Phải sửa hàng trăm dòng. Sót một dòng là sổ có hai số khác nhau cho cùng một người</td></tr>
+    <tr><td>Khi thêm</td><td>Cô Lan mở lớp Toán 7B, chưa ai đóng tiền. Không có chỗ ghi lớp đó, vì mỗi dòng là một lần đóng tiền</td></tr>
+    <tr><td>Khi xoá</td><td>Xoá lần đóng duy nhất của Bình vì ghi nhầm, và mất luôn thông tin rằng Bình học lớp Toán 6A</td></tr>
+  </tbody>
+</table></div>
+<p>Chuẩn hoá (normalization) là quá trình tách bảng để ba lỗi này không thể xảy ra: mỗi sự thật chỉ nằm ở một chỗ.</p>
+
+<h2>Ba dạng chuẩn, nói theo cách dùng được</h2>
+<p>Sách giáo khoa định nghĩa các dạng chuẩn bằng phụ thuộc hàm. Khi làm thật, bạn chỉ cần hỏi ba câu cho từng cột:</p>
+<div class="tbl"><table>
+  <thead><tr><th>Dạng chuẩn</th><th>Câu hỏi</th><th>Vi phạm trong sổ thu tiền</th></tr></thead>
+  <tbody>
+    <tr><td>1NF</td><td>Mỗi ô có đúng một giá trị không?</td><td>Một ô ghi "Toán 6A, Lý 6B" cho học sinh học hai lớp</td></tr>
+    <tr><td>2NF</td><td>Nếu khoá gồm nhiều cột, cột này có phụ thuộc vào <em>cả</em> khoá không?</td><td>Trong bảng ghi danh có khoá <code>(lớp, học sinh)</code>, cột "học phí lớp" chỉ phụ thuộc vào lớp</td></tr>
+    <tr><td>3NF</td><td>Cột này có phụ thuộc vào khoá <em>qua</em> một cột khác không?</td><td>"sdt_giao_vien" phụ thuộc vào giáo viên, giáo viên phụ thuộc vào lớp. Nó thuộc về bảng giáo viên</td></tr>
+  </tbody>
+</table></div>
+<p>Gộp lại thành một câu dễ nhớ: mỗi cột phải nói về khoá, cả khoá, và chỉ khoá. Đa số schema web dừng ở 3NF là đủ. Các dạng chuẩn cao hơn trong video có thật, nhưng hiếm khi gặp trong sản phẩm.</p>
+<p>Bảng <code>books</code> của tuần 3 có cột <code>tags text[]</code>, nhìn qua thì vi phạm 1NF. Đó là một lựa chọn có chủ ý: thẻ chỉ dùng để lọc và hiển thị, không có thông tin riêng nào cần sửa ở một chỗ. Khi thẻ cần có tên hiển thị, màu, người tạo, nó phải thành bảng riêng. Phá quy tắc thì được, miễn là bạn nói được vì sao.</p>
+
+<h2>Bài luyện: tách sổ thu tiền</h2>
+<p>Tự làm trên giấy trước khi đọc tiếp. Đi qua 11 cột của sổ, với mỗi cột hỏi "cột này nói về cái gì?". Gom các cột nói về cùng một thứ vào một bảng. Rồi chọn khoá cho từng bảng.</p>
+<div class="qa"><details><summary>Một lời giải</summary><div>
+<div class="tbl"><table>
+  <thead><tr><th>Cột của sổ</th><th>Nói về</th><th>Bảng</th></tr></thead>
+  <tbody>
+    <tr><td>giao_vien, sdt_giao_vien</td><td>Một giáo viên</td><td><code>teachers</code></td></tr>
+    <tr><td>lop, hoc_phi_lop</td><td>Một lớp</td><td><code>classes</code>, có <code>teacher_id</code></td></tr>
+    <tr><td>hoc_sinh, sdt_phu_huynh</td><td>Một học sinh</td><td><code>students</code></td></tr>
+    <tr><td>(không có cột nào)</td><td>Học sinh học lớp nào</td><td><code>enrollments</code>: sổ không ghi được điều này, nên mới có bất thường khi xoá</td></tr>
+    <tr><td>thang, phai_dong</td><td>Một hoá đơn tháng</td><td><code>invoices</code></td></tr>
+    <tr><td>ngay_dong, da_dong, ghi_chu</td><td>Một lần đóng tiền</td><td><code>payments</code></td></tr>
+  </tbody>
+</table></div>
+<p>Kết quả chính là 6 bảng bạn đã viết ở tuần 3. Lần này bạn biết vì sao nó có hình dạng đó. Còn <code>sdt_phu_huynh</code> thì sao: hai anh em ruột có cùng số phụ huynh, vậy số đó đang lặp lại. Giữ câu hỏi này trong đầu tới Thứ Bảy.</p>
+</div></details></div>
+
+<h2>Vẽ ERD bằng Mermaid</h2>
+<p>ERD (entity relationship diagram) là sơ đồ các bảng và quan hệ giữa chúng. Mermaid cho phép bạn viết sơ đồ bằng chữ. GitHub tự vẽ nó khi bạn đặt đoạn code trong khối <code>```mermaid</code> của file Markdown. Sơ đồ nằm trong Git, sửa schema thì sửa luôn sơ đồ trong cùng một commit.</p>
+<pre><code>```mermaid
+erDiagram
+  teachers    ||--o{ classes     : "dạy"
+  classes     ||--o{ enrollments : "có"
+  students    ||--o{ enrollments : "ghi danh"
+  enrollments ||--o{ invoices    : "được lập"
+  invoices    ||--o{ payments    : "được trả"
+
+  teachers {
+    bigint id PK
+    text   name
+    text   phone UK
+  }
+  classes {
+    bigint id PK
+    bigint teacher_id FK
+    text   name
+    bigint monthly_fee
+  }
+  invoices {
+    bigint id PK
+    bigint class_id FK
+    bigint student_id FK
+    date   billing_month
+    bigint amount
+  }
+```</code></pre>
+<p>Hai ký hiệu ở hai đầu mỗi đường nối cho biết mỗi bên có bao nhiêu dòng:</p>
+<div class="tbl"><table>
+  <thead><tr><th>Ký hiệu</th><th>Nghĩa</th></tr></thead>
+  <tbody>
+    <tr><td><code>||</code></td><td>Đúng một</td></tr>
+    <tr><td><code>o|</code></td><td>Không hoặc một</td></tr>
+    <tr><td><code>o{</code></td><td>Không, một hoặc nhiều</td></tr>
+    <tr><td><code>|{</code></td><td>Một hoặc nhiều</td></tr>
+  </tbody>
+</table></div>
+<p><code>teachers ||--o{ classes</code> đọc là: mỗi lớp có đúng một giáo viên, mỗi giáo viên có không, một hoặc nhiều lớp. Viết thêm khối cột cho <code>students</code>, <code>enrollments</code>, <code>payments</code>, rồi dán vào <a href="https://mermaid.live" target="_blank" rel="noopener noreferrer">mermaid.live</a> để xem hình.</p>
+<p>Quan hệ nhiều nhiều giữa lớp và học sinh không vẽ thẳng một đường. Nó đi qua <code>enrollments</code>, đúng như trong database. ERD nên khớp với bảng thật, không phải với ý tưởng.</p>
+
+<h2>Khi nào cố ý lặp dữ liệu</h2>
+<p>Phi chuẩn hoá (denormalization) là cố ý lưu một giá trị ở hai nơi. Có hai lý do chính đáng:</p>
+<ul>
+  <li><strong>Ghi lại sự thật tại một thời điểm.</strong> <code>invoices.amount</code> trông như bản sao của <code>classes.monthly_fee</code>, nhưng nó là số tiền đã tính cho tháng đó. Học phí tăng thì hoá đơn cũ vẫn phải giữ số cũ. Đây thực ra là hai sự thật khác nhau.</li>
+  <li><strong>Đọc nhanh hơn, sau khi đã đo.</strong> Ví dụ lưu sẵn tổng đã thu của mỗi hoá đơn để trang danh sách không phải cộng lại mỗi lần. Cái giá là phải giữ hai nơi luôn khớp nhau. Chỉ làm khi <code>EXPLAIN ANALYZE</code> cho thấy truy vấn gốc thật sự chậm.</li>
+</ul>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"Chuẩn hoá càng cao càng tốt."</span><span class="fix">3NF là đủ cho hầu hết sản phẩm. Tách quá mức làm mọi truy vấn phải nối sáu bảng mà không bảo vệ thêm được gì.</span></p>
+  <p><span class="wrong">"invoices.amount lặp lại monthly_fee, nên bỏ đi."</span><span class="fix">Một bên là học phí hiện tại, một bên là số tiền đã tính cho một tháng cụ thể. Bỏ đi là hoá đơn cũ đổi số mỗi khi tăng học phí.</span></p>
+  <p><span class="wrong">"ERD vẽ một lần lúc đầu dự án là xong."</span><span class="fix">Sơ đồ không ai cập nhật còn tệ hơn không có sơ đồ. Viết bằng Mermaid trong repo và sửa cùng commit với migration.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Chuẩn hoá là gì, giải quyết vấn đề gì?</summary><div><p>Chuẩn hoá là tách dữ liệu thành các bảng sao cho mỗi sự thật chỉ lưu ở một chỗ. Nó tránh ba kiểu bất thường: sửa một chỗ mà quên chỗ khác, không thêm được dữ liệu vì thiếu thứ khác đi kèm, và xoá một dòng thì mất luôn thông tin không liên quan. Trong thực tế tôi dừng ở 3NF: mỗi cột phụ thuộc vào khoá, cả khoá, và chỉ khoá.</p></div></details>
+  <details><summary>Khi nào bạn phi chuẩn hoá?</summary><div><p>Khi giá trị đó thực ra là một sự thật khác, như số tiền hoá đơn tại lúc lập so với học phí hiện tại. Hoặc khi đã đo được một truy vấn đọc quá chậm và việc lưu sẵn kết quả đáng với công giữ hai nơi khớp nhau. Khi phi chuẩn hoá vì hiệu năng, tôi ghi rõ đâu là nguồn sự thật và cái gì cập nhật bản sao.</p></div></details>
+  <details><summary>Đọc ERD này giúp tôi: teachers ||--o{ classes.</summary><div><p>Mỗi lớp thuộc đúng một giáo viên, và mỗi giáo viên có thể có không, một hoặc nhiều lớp. Trong database, nó thành cột <code>classes.teacher_id NOT NULL</code> có khoá ngoại tới <code>teachers</code>. Nếu một lớp có thể chưa có giáo viên thì đầu bên teachers phải là <code>o|</code> và cột được phép NULL.</p></div></details>
+</div>

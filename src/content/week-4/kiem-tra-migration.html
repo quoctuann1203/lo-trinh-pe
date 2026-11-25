@@ -1,0 +1,101 @@
+<h2>Migration sai theo những cách nào</h2>
+<p>Migration của bạn chạy được trên máy bạn, vì database của bạn đã đi qua đúng các bước bạn đã làm, kể cả những lệnh gõ tay trong psql mà bạn quên mất. Database của đồng đội, của CI, của server thì không có các bước đó. Những lỗi hay gặp nhất:</p>
+<div class="tbl"><table>
+  <thead><tr><th>Lỗi</th><th>Hậu quả</th></tr></thead>
+  <tbody>
+    <tr><td>Migration dựa vào thứ đã tạo bằng tay, không có trong migration nào</td><td>Chạy trên database trống thì lỗi</td></tr>
+    <tr><td>Phần down thiếu một bước, như quên <code>DROP TABLE</code></td><td>Down chạy được, nhưng up lại thì báo <code>already exists</code></td></tr>
+    <tr><td>Down không trả schema về đúng như trước up</td><td>Quay lại rồi đi tiếp thì ra một schema khác</td></tr>
+    <tr><td>Quên commit <code>db/schema.sql</code> sau khi thêm migration</td><td>Người review thấy một schema đã cũ</td></tr>
+  </tbody>
+</table></div>
+<p>Cả bốn lỗi đều bắt được tự động bằng một quy trình: tạo database trống, chạy lên, rollback hết, chạy lên lại, và so schema ở mỗi bước với file đã commit.</p>
+
+<h2>scripts/db-check.sh</h2>
+<pre><code>#!/usr/bin/env bash
+# Kiểm tra migration trên một database riêng tên hocphi_check, không đụng dữ liệu dev.
+set -euo pipefail
+
+CHECK_URL='postgres://hocphi:hocphi@db:5432/hocphi_check?sslmode=disable'
+dm() {
+  docker compose run --rm -T -e DATABASE_URL="$CHECK_URL" dbmate \
+    --schema-file /db/schema.check.sql "$@"
+}
+trap 'rm -f db/schema.check.sql' EXIT
+
+echo "1. Tạo database trống và chạy mọi migration"
+dm drop
+dm up
+
+echo "2. So với db/schema.sql đã commit"
+diff -u db/schema.sql db/schema.check.sql
+
+echo "3. Rollback từng migration cho tới hết"
+count=$(ls db/migrations/*.sql | wc -l | tr -d " ")
+for _ in $(seq "$count"); do dm down; done
+
+echo "4. Chạy lại từ đầu, schema phải y như cũ"
+dm up
+diff -u db/schema.sql db/schema.check.sql
+
+echo "OK: $count migration chạy lên, xuống, lên lại đều khớp"</code></pre>
+<p>Đọc từng phần:</p>
+<ul>
+  <li><strong><code>set -euo pipefail</code></strong>: dừng ngay khi có lệnh lỗi. Không có dòng này thì script vẫn in "OK" sau khi <code>diff</code> đã báo khác.</li>
+  <li><strong>Database <code>hocphi_check</code> riêng</strong>: <code>dm drop</code> xoá database đó, không đụng tới dữ liệu bạn đang dùng để phát triển. Ghi đè <code>DATABASE_URL</code> bằng <code>-e</code> cho riêng lần chạy này.</li>
+  <li><strong><code>--schema-file /db/schema.check.sql</code></strong>: dbmate ghi bản dump ra một file khác, để so với <code>db/schema.sql</code> thật. <code>trap ... EXIT</code> xoá file đó khi script kết thúc, kể cả khi lỗi.</li>
+  <li><strong>Bước 2</strong> bắt lỗi quên commit schema, và lỗi migration dựa vào thứ không có trong migration.</li>
+  <li><strong>Bước 3 và 4</strong> bắt lỗi down thiếu bước hoặc không trả về đúng.</li>
+</ul>
+<p>Chạy bằng <code>npm run db:check</code>. Lần đầu sẽ thấy nhiều dòng của Docker và dbmate, dòng cuối phải là:</p>
+<pre><code>OK: 5 migration chạy lên, xuống, lên lại đều khớp</code></pre>
+
+<h2>Cố tình làm hỏng để tin script</h2>
+<p>Một bài kiểm tra chưa từng báo lỗi thì chưa chắc đã kiểm tra được gì. Giống như ở tuần 2 bạn làm test thất bại trước khi tin nó. Thử ba cách làm hỏng, mỗi lần xong thì sửa lại:</p>
+<ol class="list">
+  <li>Xoá dòng <code>DROP TABLE parents;</code> trong phần down của migration tách phụ huynh. Script dừng ở bước 4: <code>Error: pq: relation "parents" already exists (42P07)</code>.</li>
+  <li>Tạo một migration mới thêm cột <code>parents.note</code>, nhưng chưa chạy <code>npm run db:migrate</code> trên database dev. Script dừng ở bước 2, và <code>diff</code> chỉ ra hai chỗ <code>schema.sql</code> đang thiếu: cột <code>note text</code> và số version của migration mới.</li>
+  <li>Trong psql của database dev, gõ tay <code>CREATE TABLE notes (id int)</code>, rồi viết một migration có <code>ALTER TABLE notes ...</code>. <code>npm run db:migrate</code> chạy được, nhưng <code>db:check</code> thì không. Đó chính là lỗi "chạy được trên máy tôi".</li>
+</ol>
+
+<h2>Những gì script không bắt được</h2>
+<p>Script chạy trên database trống, nên nó không thấy được ba thứ quan trọng nhất trên server thật:</p>
+<ul>
+  <li><strong>Thời gian và khoá.</strong> Một lệnh viết lại bảng mất 1 mili giây trên bảng trống.</li>
+  <li><strong>Dữ liệu cũ không hợp lệ.</strong> Như lỗi down của <code>archive_classes</code> bạn gặp ở bài trước.</li>
+  <li><strong>Backfill sai.</strong> Bảng trống thì không có gì để chép sai.</li>
+</ul>
+<p>Hai lớp bảo vệ còn lại là người đọc migration trước khi gộp, và chạy thử trên một bản sao dữ liệu đủ lớn.</p>
+
+<h2>Danh sách review một migration</h2>
+<p>Dùng danh sách này khi tự review, và khi nhờ AI review:</p>
+<div class="tbl"><table>
+  <thead><tr><th>Hỏi</th><th>Nếu không</th></tr></thead>
+  <tbody>
+    <tr><td>Có lệnh nào viết lại hoặc quét cả bảng không?</td><td>Đổi sang cách không chặn: <code>CONCURRENTLY</code>, <code>NOT VALID</code>, hoặc expand và contract</td></tr>
+    <tr><td>Có <code>SET LOCAL lock_timeout</code> chưa?</td><td>Thêm vào đầu migration</td></tr>
+    <tr><td>Code đang chạy có lỗi khi gặp schema mới không?</td><td>Tách thành expand, rồi contract sau khi code đã đổi</td></tr>
+    <tr><td>Có backfill không? Có câu kiểm tra kết quả chưa?</td><td>Viết câu kiểm tra với kết quả biết trước</td></tr>
+    <tr><td>Down có trả về đúng schema cũ không?</td><td><code>db:check</code> sẽ báo</td></tr>
+    <tr><td>Down có làm mất dữ liệu không?</td><td>Ghi rõ trong mô tả pull request</td></tr>
+    <tr><td><code>schema.sql</code> và ERD đã cập nhật chưa?</td><td>Chạy <code>db:migrate</code>, sửa Mermaid trong README</td></tr>
+  </tbody>
+</table></div>
+<p>Video tuần này nói về một lỗi khác mà database trống không bao giờ lộ ra: deadlock. Nó xảy ra khi migration khoá hai bảng theo thứ tự ngược với transaction của ứng dụng. Cách phòng là giữ mỗi migration nhỏ, đụng tới ít bảng, và luôn có <code>lock_timeout</code>.</p>
+
+<h2>Đưa vào CI sau</h2>
+<p>Ở tuần 17 bạn sẽ dựng GitHub Actions. Lúc đó <code>npm run db:check</code> chạy trên mọi pull request, và không ai gộp được một migration hỏng. Hôm nay chỉ cần chạy nó trước mỗi lần commit migration.</p>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"Migration chạy được trên máy tôi rồi."</span><span class="fix">Database của bạn có lịch sử mà nơi khác không có. Chỉ tin migration khi nó chạy được từ database trống.</span></p>
+  <p><span class="wrong">"db:check xanh là migration an toàn để chạy trên production."</span><span class="fix">Nó chỉ chứng minh migration đúng về cấu trúc. Khoá, thời gian chạy và dữ liệu cũ cần người review và chạy thử trên bản sao dữ liệu.</span></p>
+  <p><span class="wrong">"Script kiểm tra không báo lỗi lần nào, chứng tỏ migration tốt."</span><span class="fix">Hoặc script không kiểm tra gì. Làm hỏng có chủ đích một lần để thấy nó báo lỗi.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Bạn kiểm tra migration trước khi gộp thế nào?</summary><div><p>Tự động, tôi có một script chạy trên database trống: chạy mọi migration, so schema với file đã commit, rollback hết, chạy lại, rồi so lần nữa. Script đó bắt được migration dựa vào trạng thái không có trong repo và down viết thiếu. Bằng tay, tôi review theo danh sách: có lệnh nào khoá bảng lâu không, có lock_timeout chưa, code cũ có chạy được với schema mới không, backfill có câu kiểm tra chưa. Với migration lớn, tôi chạy thử trên bản sao dữ liệu thật để đo thời gian.</p></div></details>
+  <details><summary>Vì sao phải kiểm tra migration trên database trống?</summary><div><p>Vì database trên máy lập trình viên có lịch sử riêng: lệnh gõ tay, migration đã sửa sau khi chạy, nhánh khác đã chạy rồi bỏ. Migration chạy được ở đó chưa chắc chạy được ở CI hay trên máy người mới. Database trống là trạng thái duy nhất mà mọi người đều có giống nhau.</p></div></details>
+  <details><summary>Có những rủi ro nào mà kiểm tra trên database trống không phát hiện được?</summary><div><p>Thời gian chạy và khoá, vì bảng trống thì lệnh nào cũng nhanh. Dữ liệu cũ vi phạm ràng buộc mới. Backfill nối sai điều kiện. Deadlock với transaction của ứng dụng. Những rủi ro này cần review, chạy thử trên bản sao dữ liệu có kích thước thật, và dùng lock_timeout để migration tự huỷ thay vì chặn người dùng.</p></div></details>
+</div>

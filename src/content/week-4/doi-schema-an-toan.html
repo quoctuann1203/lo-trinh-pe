@@ -1,0 +1,101 @@
+<h2>Vấn đề không nằm ở SQL, mà ở khoá</h2>
+<p>Hầu hết lệnh <code>ALTER TABLE</code> cần khoá mạnh nhất của PostgreSQL trên bảng đó, gọi là <code>ACCESS EXCLUSIVE</code>. Trong lúc giữ khoá, không ai đọc hay ghi được bảng. Nếu lệnh chỉ đổi thông tin mô tả bảng, khoá được giữ vài mili giây và không ai nhận ra. Nếu lệnh phải đọc hay viết lại mọi dòng, khoá được giữ đúng bằng thời gian đó: vài giây với một triệu dòng, vài phút với một trăm triệu dòng.</p>
+<p>Còn một cái bẫy tệ hơn: hàng đợi khoá. Thử với ba cửa sổ psql:</p>
+<pre><code>-- Cửa sổ 1: một transaction đang đọc, chưa kết thúc
+BEGIN;
+SELECT count(*) FROM students;
+
+-- Cửa sổ 2: migration muốn thêm cột. Lệnh này đứng chờ cửa sổ 1
+ALTER TABLE students ADD COLUMN nickname text;
+
+-- Cửa sổ 3: một người dùng chỉ muốn đọc. Lệnh này cũng đứng chờ!
+SELECT name FROM students LIMIT 1;</code></pre>
+<p>Cửa sổ 3 chỉ cần khoá đọc, vốn không xung đột với cửa sổ 1. Nhưng nó phải xếp hàng sau lệnh <code>ALTER</code> đang chờ. Một lệnh <code>ALTER</code> lẽ ra chạy trong 1 mili giây, chỉ vì chờ một transaction chậm, đã làm cả bảng đứng im. Gõ <code>COMMIT</code> ở cửa sổ 1 và xem hai cửa sổ kia chạy tiếp.</p>
+
+<h2>lock_timeout: thà thất bại còn hơn chặn mọi người</h2>
+<p>Lặp lại thí nghiệm, nhưng ở cửa sổ 2 đặt giới hạn thời gian chờ khoá:</p>
+<pre><code>SET lock_timeout = '2s';
+ALTER TABLE students ADD COLUMN nickname text;
+-- ERROR:  canceling statement due to lock timeout</code></pre>
+<p>Sau 2 giây lệnh tự huỷ, hàng đợi được giải phóng, người dùng không bị ảnh hưởng thêm. Bạn chạy lại migration vào lúc khác. Trong file migration của dbmate, mọi thứ đã nằm trong một transaction, nên dùng <code>SET LOCAL</code> để giới hạn chỉ áp dụng cho transaction đó:</p>
+<pre><code>-- migrate:up
+SET LOCAL lock_timeout = '3s';
+ALTER TABLE students ADD COLUMN nickname text;</code></pre>
+<p>Migration thất bại vì <code>lock_timeout</code> là chuyện bình thường và an toàn: transaction được hoàn tác, không có gì thay đổi.</p>
+
+<h2>Lệnh nào nhanh, lệnh nào chậm</h2>
+<p>Bảng này đúng với PostgreSQL 18. Phiên bản cũ có thể khác, và bạn sẽ đọc thấy nhiều lời khuyên cũ trên mạng.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Lệnh</th><th>Tốn bao lâu</th><th>Cách an toàn</th></tr></thead>
+  <tbody>
+    <tr><td><code>ADD COLUMN x text</code></td><td>Tức thì</td><td>Dùng thoải mái</td></tr>
+    <tr><td><code>ADD COLUMN x bigint NOT NULL DEFAULT 0</code></td><td>Tức thì, kể cả <code>DEFAULT now()</code></td><td>Dùng thoải mái</td></tr>
+    <tr><td><code>ADD COLUMN x uuid DEFAULT uuidv7()</code></td><td>Viết lại cả bảng, vì mỗi dòng cần một giá trị khác nhau</td><td>Thêm cột không có default, điền dần, rồi mới đặt default</td></tr>
+    <tr><td><code>CREATE INDEX</code></td><td>Chặn mọi lệnh ghi trong suốt lúc tạo</td><td><code>CREATE INDEX CONCURRENTLY</code></td></tr>
+    <tr><td><code>ADD CONSTRAINT ... CHECK</code> hoặc <code>FOREIGN KEY</code></td><td>Quét cả bảng để kiểm tra, trong lúc giữ khoá</td><td>Thêm với <code>NOT VALID</code>, rồi <code>VALIDATE CONSTRAINT</code></td></tr>
+    <tr><td><code>ALTER COLUMN x SET NOT NULL</code></td><td>Quét cả bảng</td><td>Từ bản 18: <code>ADD CONSTRAINT ... NOT NULL x NOT VALID</code>, rồi <code>VALIDATE</code></td></tr>
+    <tr><td><code>ALTER COLUMN x TYPE ...</code></td><td>Thường viết lại cả bảng và mọi index</td><td>Thêm cột mới, chép dữ liệu, chuyển code, bỏ cột cũ</td></tr>
+    <tr><td><code>RENAME COLUMN</code>, <code>DROP COLUMN</code></td><td>Tức thì</td><td>Nhanh nhưng làm code đang chạy bị lỗi. Xem phần expand và contract</td></tr>
+  </tbody>
+</table></div>
+<p>Có thể tự kiểm tra một lệnh có viết lại bảng không: <code>SELECT pg_relation_filenode('invoices')</code> trước và sau lệnh. Con số đổi tức là Postgres đã tạo file dữ liệu mới, tức là đã viết lại toàn bộ bảng.</p>
+
+<h3>NOT VALID rồi VALIDATE</h3>
+<pre><code>-- Bước 1: tức thì. Ràng buộc có hiệu lực ngay với dòng MỚI, chưa kiểm tra dòng cũ
+ALTER TABLE invoices
+  ADD CONSTRAINT invoices_discount_check CHECK (discount &gt;= 0 AND discount &lt; amount) NOT VALID;
+
+-- Bước 2: quét dòng cũ, nhưng chỉ giữ khoá nhẹ, đọc ghi vẫn chạy bình thường
+ALTER TABLE invoices VALIDATE CONSTRAINT invoices_discount_check;</code></pre>
+<p>Nếu bước 2 báo lỗi, tức là có dòng cũ vi phạm. Sửa dữ liệu đó rồi chạy lại bước 2. Ràng buộc vẫn bảo vệ dữ liệu mới trong lúc bạn sửa.</p>
+
+<h3>CREATE INDEX CONCURRENTLY</h3>
+<p>Tạo index mà không chặn lệnh ghi, đổi lại chậm hơn khoảng hai lần. Lệnh này không được chạy trong transaction:</p>
+<pre><code>BEGIN;
+CREATE INDEX CONCURRENTLY students_name_idx ON students (name);
+-- ERROR:  CREATE INDEX CONCURRENTLY cannot run inside a transaction block</code></pre>
+<p>Vì vậy file migration chứa nó phải tắt transaction của dbmate, và chỉ nên chứa đúng một lệnh đó. Nếu lệnh thất bại giữa chừng, nó để lại một index ở trạng thái <code>INVALID</code>. Phải <code>DROP INDEX</code> rồi chạy lại.</p>
+<pre><code>-- migrate:up transaction:false
+CREATE INDEX CONCURRENTLY payments_invoice_id_idx ON payments (invoice_id);
+
+-- migrate:down transaction:false
+DROP INDEX CONCURRENTLY payments_invoice_id_idx;</code></pre>
+
+<h2>Expand và contract</h2>
+<p>Khoá chỉ là một nửa vấn đề. Nửa còn lại: lúc deploy, có một khoảng thời gian code cũ vẫn chạy trên schema mới. Đổi tên cột <code>parent_phone</code> thành <code>phone</code> mất 1 mili giây, nhưng mọi request của code cũ có <code>SELECT parent_phone</code> sẽ lỗi cho tới khi code mới lên xong.</p>
+<p>Expand và contract tách một thay đổi phá vỡ thành nhiều bước, mỗi bước tương thích với cả code cũ lẫn code mới:</p>
+<div class="tbl"><table>
+  <thead><tr><th>Bước</th><th>Schema</th><th>Code</th></tr></thead>
+  <tbody>
+    <tr><td>1. Expand</td><td>Thêm cấu trúc mới bên cạnh cấu trúc cũ. Chép dữ liệu cũ sang (backfill)</td><td>Code cũ vẫn chạy, không biết gì về phần mới</td></tr>
+    <tr><td>2. Chuyển ghi</td><td></td><td>Code ghi vào cả hai nơi</td></tr>
+    <tr><td>3. Chuyển đọc</td><td></td><td>Code chỉ đọc nơi mới. Kiểm tra mọi thứ ổn</td></tr>
+    <tr><td>4. Contract</td><td>Bỏ cấu trúc cũ</td><td>Code chỉ còn biết nơi mới</td></tr>
+  </tbody>
+</table></div>
+<p>Mỗi bước là một lần deploy riêng, có thể cách nhau vài ngày. Nếu bước 3 có vấn đề, bạn quay lại bước 2 mà không mất gì, vì dữ liệu cũ vẫn còn nguyên. Chỉ bước 4 là không quay lại được, nên nó luôn là bước cuối và làm khi đã chắc chắn.</p>
+<p>Hôm nay hocphi chưa có code nào đọc database, đó là việc của tuần 5. Bạn sẽ làm bước 1 và bước 4 trong hai migration riêng, và ghi vào notes code ở bước 2, 3 sẽ phải làm gì.</p>
+
+<h3>Backfill trên bảng lớn</h3>
+<p>Một câu <code>UPDATE</code> trên 2.000 dòng chạy trong chớp mắt. Trên 10 triệu dòng, nó giữ khoá ghi trên từng dòng tới khi transaction kết thúc, và tạo ra một transaction khổng lồ. Với bảng lớn, backfill làm theo từng lô nhỏ, mỗi lô một transaction, ngoài migration:</p>
+<pre><code>UPDATE students s
+SET parent_id = p.id
+FROM parents p
+WHERE p.phone = s.parent_phone
+  AND s.parent_id IS NULL
+  AND s.id BETWEEN 1 AND 10000;   -- lô tiếp theo: 10001 tới 20000...</code></pre>
+<p>Với dữ liệu của hocphi bây giờ thì chưa cần. Biết là có cách này để nói được khi phỏng vấn.</p>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"Thêm cột có DEFAULT trên bảng lớn sẽ khoá bảng rất lâu."</span><span class="fix">Đúng với PostgreSQL trước bản 11. Từ bản 11, default là hằng số hay now() thì tức thì. Chỉ hàm cho mỗi dòng một giá trị khác nhau mới viết lại bảng.</span></p>
+  <p><span class="wrong">"Lệnh ALTER chạy nhanh thì không ảnh hưởng ai."</span><span class="fix">Nếu nó phải chờ khoá, mọi truy vấn đến sau xếp hàng sau nó, kể cả SELECT. Luôn đặt lock_timeout.</span></p>
+  <p><span class="wrong">"Đổi tên cột là thay đổi nhỏ."</span><span class="fix">Với database thì nhỏ, với code đang chạy thì là phá vỡ. Thêm cột mới, chuyển code, rồi mới bỏ cột cũ.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Bạn đổi tên một cột trên production thế nào mà không có downtime?</summary><div><p>Theo expand và contract. Thêm cột mới và chép dữ liệu sang. Deploy code ghi vào cả hai cột. Deploy code chỉ đọc cột mới. Khi chắc chắn không còn gì dùng cột cũ, viết migration xoá nó. Mỗi bước tương thích với cả phiên bản code trước và sau nó, nên lúc deploy không có request nào lỗi, và trước bước cuối luôn quay lại được.</p></div></details>
+  <details><summary>Một migration chạy nhanh trên máy bạn lại làm production treo vài phút. Vì sao?</summary><div><p>Có hai khả năng. Lệnh đó quét hoặc viết lại cả bảng, chạy nhanh trên dữ liệu mẫu nhưng chậm trên bảng thật, trong lúc giữ khoá chặn mọi truy cập. Hoặc lệnh phải chờ một transaction dài đang chạy, và mọi truy vấn đến sau xếp hàng sau nó. Cách phòng là biết lệnh nào viết lại bảng, dùng các phiên bản không chặn như CONCURRENTLY hay NOT VALID, và đặt lock_timeout để migration tự huỷ thay vì chặn mọi người.</p></div></details>
+  <details><summary>Thêm ràng buộc vào bảng lớn thế nào cho an toàn?</summary><div><p>Thêm ràng buộc với NOT VALID: việc này tức thì, và ràng buộc có hiệu lực ngay với dữ liệu mới. Sau đó chạy VALIDATE CONSTRAINT để kiểm tra dữ liệu cũ. Bước này quét bảng nhưng chỉ giữ khoá nhẹ, nên đọc ghi vẫn chạy. Index thì dùng CREATE INDEX CONCURRENTLY, chạy ngoài transaction.</p></div></details>
+</div>

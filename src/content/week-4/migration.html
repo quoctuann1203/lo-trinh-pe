@@ -1,0 +1,112 @@
+<h2>Vì sao không sửa schema.sql nữa</h2>
+<p>Ở tuần 3, mỗi lần đổi schema bạn sửa <code>schema.sql</code> rồi chạy lại từ đầu, vì file bắt đầu bằng <code>DROP TABLE</code>. Cách đó chỉ đúng khi dữ liệu không quan trọng. Khi đã có giáo viên dùng thật, xoá bảng là mất sổ thu tiền của họ.</p>
+<p>Cách thứ hai là mở psql trên server và gõ <code>ALTER TABLE</code> bằng tay. Một tháng sau không ai nhớ đã gõ gì. Máy bạn, máy đồng đội và server lệch nhau, và lỗi chỉ hiện ra khi deploy.</p>
+<p>Migration giải quyết cả hai vấn đề. Mỗi thay đổi schema là một file SQL riêng, tên bắt đầu bằng thời điểm tạo:</p>
+<pre><code>db/migrations/
+  20261203090000_create_books.sql
+  20261203093000_books_author_set_null.sql
+  20261203100000_add_updated_at.sql</code></pre>
+<p>Database giữ một bảng <code>schema_migrations</code> ghi lại file nào đã chạy. Lệnh <code>up</code> chạy những file chưa có trong bảng đó, theo thứ tự tên. Database ở đâu cũng đi qua đúng các bước giống nhau, theo đúng thứ tự.</p>
+
+<h2>dbmate: công cụ migration bằng SQL thuần</h2>
+<p>Có rất nhiều công cụ migration. Nhiều cái gắn với một ORM, bạn viết schema bằng TypeScript rồi công cụ sinh SQL. Tuần này dùng dbmate vì bạn viết thẳng SQL, đúng thứ bạn vừa học ở tuần 3, và nó không phụ thuộc ngôn ngữ của ứng dụng. Chạy nó bằng Docker nên không cần cài gì thêm. Thêm vào <code>compose.yaml</code> của <code>sql-practice</code>:</p>
+<pre><code>services:
+  db:
+    # ... giữ nguyên như tuần 3
+
+  dbmate:
+    image: ghcr.io/amacneil/dbmate:2.38.2
+    profiles: [tools]               # không tự chạy khi docker compose up
+    environment:
+      DATABASE_URL: postgres://hoc:hoc@db:5432/books?sslmode=disable
+      DBMATE_WAIT: "true"           # đợi Postgres sẵn sàng rồi mới chạy
+    volumes:
+      - ./db:/db
+    depends_on:
+      - db</code></pre>
+<p>Hai điểm đáng chú ý. Thứ nhất, <code>DATABASE_URL</code> trỏ tới database <code>books</code>, không phải <code>hoc</code>. Database <code>hoc</code> đã có bảng tạo bằng tay từ tuần 3, còn <code>books</code> sẽ được dbmate tạo mới. Thứ hai, <code>@db:5432</code> dùng tên service <code>db</code>, vì dbmate chạy trong cùng mạng Docker với Postgres.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Lệnh</th><th>Làm gì</th></tr></thead>
+  <tbody>
+    <tr><td><code>docker compose run --rm dbmate new create_books</code></td><td>Tạo file migration trống, tên có thời điểm hiện tại</td></tr>
+    <tr><td><code>docker compose run --rm dbmate up</code></td><td>Tạo database nếu chưa có, chạy mọi migration chưa chạy</td></tr>
+    <tr><td><code>docker compose run --rm dbmate status</code></td><td>Liệt kê migration đã chạy <code>[X]</code> và chưa chạy <code>[ ]</code></td></tr>
+    <tr><td><code>docker compose run --rm dbmate down</code></td><td>Chạy phần down của migration mới nhất, một file mỗi lần</td></tr>
+    <tr><td><code>docker compose run --rm dbmate drop</code></td><td>Xoá cả database. Chỉ dùng trên máy mình</td></tr>
+  </tbody>
+</table></div>
+<p>Gõ <code>docker compose run --rm dbmate</code> mãi thì dài. Ở repo hocphi hôm Thứ Bảy bạn sẽ gói chúng vào script npm.</p>
+
+<h2>Migration đầu tiên</h2>
+<p>Chạy lệnh <code>new</code>, mở file vừa sinh ra, và chép schema sách của tuần 3 vào. Lần này không có <code>DROP TABLE</code> ở đầu:</p>
+<pre><code>-- migrate:up
+CREATE TABLE authors (
+  id   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  name text NOT NULL CHECK (length(trim(name)) &gt; 0),
+  born integer CHECK (born BETWEEN 1000 AND 2100)
+);
+
+CREATE TABLE books (
+  -- ... giống 02-schema.sql
+);
+
+CREATE TABLE reviews (
+  -- ... giống 02-schema.sql
+);
+
+-- migrate:down
+DROP TABLE reviews, books, authors;</code></pre>
+<p>Hai dòng chú thích <code>-- migrate:up</code> và <code>-- migrate:down</code> là cú pháp của dbmate, không phải tuỳ chọn. Phần down làm ngược lại phần up, và theo thứ tự ngược lại: bảng con bị xoá trước bảng cha.</p>
+<pre><code>docker compose run --rm dbmate up
+# Applying: 20261203090000_create_books.sql
+# Applied: 20261203090000_create_books.sql in 14ms
+# Writing: ./db/schema.sql
+
+docker compose run --rm dbmate status
+# [X] 20261203090000_create_books.sql
+#
+# Applied: 1
+# Pending: 0</code></pre>
+<p>Vào psql xem tận mắt: <code>docker compose exec db psql -U hoc -d books</code>, rồi <code>\dt</code> và <code>SELECT * FROM schema_migrations;</code>. Bảng đó chỉ có một cột <code>version</code> chứa phần số ở đầu tên file.</p>
+
+<h2>db/schema.sql: ảnh chụp schema sau mỗi lần chạy</h2>
+<p>Sau mỗi lần <code>up</code> hay <code>down</code>, dbmate gọi <code>pg_dump</code> và ghi toàn bộ schema hiện tại ra <code>db/schema.sql</code>. Image Docker của dbmate có sẵn <code>pg_dump</code> bản 18, nên bạn không phải cài. File này nên được commit, vì hai lý do:</p>
+<ul>
+  <li>Muốn biết bảng <code>books</code> bây giờ có những cột nào, đọc một file thay vì cộng mười migration lại trong đầu.</li>
+  <li>Khi review pull request, phần diff của <code>schema.sql</code> cho thấy chính xác schema đã đổi gì, kể cả những thứ bạn không cố ý đổi.</li>
+</ul>
+<p>Không bao giờ sửa <code>schema.sql</code> bằng tay. Nó là kết quả, không phải nguồn.</p>
+
+<h2>Mỗi migration chạy trong một transaction</h2>
+<p>dbmate bọc mỗi file trong <code>BEGIN</code> và <code>COMMIT</code>. Nếu câu lệnh thứ ba trong file lỗi, hai câu đầu cũng được hoàn tác, và file không được ghi vào <code>schema_migrations</code>. Bạn sửa file rồi chạy lại. Không bao giờ có chuyện migration chạy được một nửa.</p>
+<p>Có một số lệnh PostgreSQL không được chạy trong transaction, như <code>CREATE INDEX CONCURRENTLY</code>. Với những file đó, viết <code>-- migrate:up transaction:false</code>. Thứ Bảy bạn sẽ gặp trường hợp này.</p>
+
+<h2>Bốn quy tắc</h2>
+<ol class="list">
+  <li><strong>Đã chạy ở nơi khác thì không sửa nữa.</strong> Đã push lên và có người chạy rồi, sửa file cũ không có tác dụng gì với database của họ, vì <code>schema_migrations</code> đã ghi là xong. Muốn đổi tiếp thì viết migration mới.</li>
+  <li><strong>Một migration, một thay đổi có nghĩa.</strong> "Thêm cột updated_at" là một migration. "Đủ thứ sửa trong tuần" thì không. File nhỏ dễ review, và down dễ viết.</li>
+  <li><strong>Luôn viết down, và chạy thử nó.</strong> Down là cách bạn quay lại trên máy mình khi viết sai. Trên server thật, người ta thường sửa bằng một migration mới thay vì chạy down, nhưng down vẫn phải chạy đúng.</li>
+  <li><strong>Dữ liệu mẫu không nằm trong migration.</strong> Migration chạy ở mọi môi trường, kể cả server thật. 20 cuốn sách mẫu nằm trong file seed riêng, chỉ chạy trên máy mình.</li>
+</ol>
+
+<h2>Bài luyện Thứ Năm</h2>
+<ol class="list">
+  <li>Tạo migration <code>create_books</code> từ <code>02-schema.sql</code>. Chạy <code>up</code>, <code>status</code>, <code>down</code>, <code>status</code>, <code>up</code>.</li>
+  <li>Cố tình viết sai một câu ở giữa migration thứ hai, chạy <code>up</code>, rồi dùng <code>\d</code> kiểm tra rằng không có gì thay đổi.</li>
+  <li>Chạy <code>dbmate drop</code> rồi <code>up</code>. Nếu lệnh <code>up</code> chạy từ database trống ra lỗi, migration của bạn đang dựa vào thứ không có trong migration.</li>
+  <li>Đọc <code>db/schema.sql</code>. Tìm tên ràng buộc mà Postgres tự đặt cho khoá ngoại <code>books.author_id</code>. Bài tiếp theo sẽ cần đến nó.</li>
+</ol>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"Migration chạy rồi mà sai, mở file ra sửa lại là được."</span><span class="fix">Database đã ghi nhận file đó, nên sửa không có tác dụng ở những nơi đã chạy. Viết migration mới để sửa.</span></p>
+  <p><span class="wrong">"Down migration không bao giờ dùng trên server, khỏi viết."</span><span class="fix">Bạn dùng nó hằng ngày trên máy mình khi đang viết migration. Và chạy thử down là cách kiểm tra rằng up thật sự làm đúng như bạn nghĩ.</span></p>
+  <p><span class="wrong">"Cho dữ liệu mẫu vào migration để ai chạy cũng có sẵn."</span><span class="fix">Migration chạy cả trên server thật. Dữ liệu mẫu nằm trong file seed riêng.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Database migration là gì, vì sao cần?</summary><div><p>Migration là các file mô tả từng thay đổi schema, đánh số theo thứ tự và được quản lý trong Git cùng với code. Công cụ migration ghi lại trong database những file nào đã chạy, nên mỗi môi trường chỉ chạy phần còn thiếu. Nhờ vậy mọi database đi qua cùng các bước, thay đổi schema được review như code, và ai clone repo về cũng dựng lại được schema bằng một lệnh.</p></div></details>
+  <details><summary>Một migration đã chạy trên production bị sai, bạn làm gì?</summary><div><p>Tôi không sửa file cũ, vì production đã ghi nhận nó là đã chạy. Tôi viết một migration mới để sửa, kiểm tra nó trên bản sao dữ liệu, rồi deploy như bình thường. Chạy down trên production chỉ khi chắc chắn down không làm mất dữ liệu, mà với những thay đổi như xoá cột thì điều đó không đúng.</p></div></details>
+  <details><summary>Vì sao commit cả file schema.sql do công cụ sinh ra?</summary><div><p>Vì nó là ảnh chụp schema hiện tại, đọc một file nhanh hơn cộng dồn mọi migration. Khi review, diff của nó cho thấy chính xác migration đã làm gì với schema, kể cả tác dụng phụ ngoài ý muốn. Nó cũng giúp phát hiện khi database của ai đó lệch khỏi migration.</p></div></details>
+</div>

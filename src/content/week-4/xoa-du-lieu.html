@@ -1,0 +1,103 @@
+<h2>Xoá dòng cha thì dòng con ra sao</h2>
+<p>Thử xoá một giáo viên đang có lớp trong schema học phí:</p>
+<pre><code>DELETE FROM teachers WHERE id = 1;
+-- ERROR:  update or delete on table "teachers" violates foreign key constraint
+--         "classes_teacher_id_fkey" on table "classes"
+-- DETAIL:  Key (id)=(1) is still referenced from table "classes".</code></pre>
+<p>Đó là hành vi mặc định, và cũng là hành vi an toàn: database không cho bạn tạo ra lớp học không có giáo viên. Khi khai báo khoá ngoại, bạn có thể chọn hành vi khác:</p>
+<div class="tbl"><table>
+  <thead><tr><th>Viết</th><th>Xoá dòng cha thì</th><th>Hợp với</th></tr></thead>
+  <tbody>
+    <tr><td>Không ghi gì, tức <code>NO ACTION</code>. Hoặc <code>ON DELETE RESTRICT</code></td><td>Báo lỗi nếu còn dòng con</td><td>Mặc định cho mọi thứ liên quan tới tiền</td></tr>
+    <tr><td><code>ON DELETE CASCADE</code></td><td>Xoá luôn mọi dòng con</td><td>Dòng con không có nghĩa khi thiếu cha: đánh giá của một cuốn sách</td></tr>
+    <tr><td><code>ON DELETE SET NULL</code></td><td>Đặt khoá ngoại của dòng con thành <code>NULL</code></td><td>Dòng con vẫn có nghĩa khi thiếu cha: sách chưa rõ tác giả</td></tr>
+    <tr><td><code>ON DELETE SET DEFAULT</code></td><td>Đặt về giá trị mặc định</td><td>Hiếm khi dùng</td></tr>
+  </tbody>
+</table></div>
+<p>Câu hỏi để chọn: nếu dòng cha biến mất, dòng con còn đúng không? Một đánh giá về cuốn sách không còn tồn tại thì vô nghĩa, nên dùng <code>CASCADE</code>. Một cuốn sách mà tác giả bị xoá vẫn là cuốn sách, nên dùng <code>SET NULL</code>. Một khoản học phí đã đóng thì phải còn mãi, nên để mặc định.</p>
+<p><code>CASCADE</code> nguy hiểm vì nó lan theo chuỗi. Nếu <code>classes</code>, <code>enrollments</code>, <code>invoices</code>, <code>payments</code> đều <code>CASCADE</code>, thì một lệnh <code>DELETE FROM teachers WHERE id = 1</code> xoá sạch hai năm sổ thu tiền của cô giáo đó, không có lời cảnh báo nào.</p>
+
+<h2>Đổi hành vi của một khoá ngoại có sẵn</h2>
+<p>Không có lệnh "sửa khoá ngoại". Phải bỏ ràng buộc cũ và thêm ràng buộc mới, viết trong cùng một câu <code>ALTER TABLE</code>, để không có lúc nào bảng thiếu ràng buộc. Tên ràng buộc lấy từ <code>db/schema.sql</code> hoặc <code>\d books</code>:</p>
+<pre><code>-- migrate:up
+ALTER TABLE books
+  DROP CONSTRAINT books_author_id_fkey,
+  ADD CONSTRAINT books_author_id_fkey
+    FOREIGN KEY (author_id) REFERENCES authors (id) ON DELETE SET NULL;
+
+-- migrate:down
+ALTER TABLE books
+  DROP CONSTRAINT books_author_id_fkey,
+  ADD CONSTRAINT books_author_id_fkey
+    FOREIGN KEY (author_id) REFERENCES authors (id);</code></pre>
+<p>Chạy <code>up</code>, xoá một tác giả có sách, rồi xem sách của họ: <code>author_id</code> đã thành <code>NULL</code>. Xoá một cuốn sách có đánh giá: các đánh giá biến mất theo.</p>
+
+<h2>Xoá mềm: lưu trữ thay vì xoá</h2>
+<p>Giáo viên kết thúc lớp Toán 6A sau hè. Họ muốn lớp đó biến khỏi danh sách, nhưng hoá đơn cũ phải còn, để cuối năm còn đối chiếu. Đây là xoá mềm (soft delete): giữ dòng lại, đánh dấu là đã lưu trữ.</p>
+<pre><code>ALTER TABLE classes ADD COLUMN archived_at timestamptz;   -- NULL: đang mở
+
+UPDATE classes SET archived_at = now() WHERE id = 1;     -- "xoá"
+
+SELECT * FROM classes WHERE archived_at IS NULL;          -- danh sách lớp đang mở</code></pre>
+<p>Dùng thời điểm thay vì <code>boolean</code>: bạn biết luôn lớp được lưu trữ lúc nào. Xoá mềm có ba cái giá, nên biết trước khi dùng:</p>
+<ul>
+  <li><strong>Mọi truy vấn phải nhớ lọc.</strong> Quên <code>WHERE archived_at IS NULL</code> ở một chỗ là lớp đã đóng hiện lại ở chỗ đó.</li>
+  <li><strong>Ràng buộc UNIQUE không còn đúng nghĩa.</strong> Xem phần dưới.</li>
+  <li><strong>Dữ liệu không bao giờ mất.</strong> Đó là điều bạn muốn với hoá đơn. Nhưng nếu người dùng yêu cầu xoá dữ liệu cá nhân của họ, xoá mềm không phải là xoá.</li>
+</ul>
+
+<h3>UNIQUE một phần</h3>
+<p><code>classes</code> có <code>UNIQUE (teacher_id, name)</code>: một giáo viên không có hai lớp trùng tên. Năm sau cô Lan mở lại lớp "Toán 6A". Lớp cũ đã lưu trữ nhưng dòng vẫn còn, nên ràng buộc chặn lại. Cách sửa là chỉ bắt duy nhất trong những dòng chưa lưu trữ:</p>
+<pre><code>ALTER TABLE classes DROP CONSTRAINT classes_teacher_id_name_key;
+
+CREATE UNIQUE INDEX classes_teacher_id_name_active_key
+  ON classes (teacher_id, name)
+  WHERE archived_at IS NULL;</code></pre>
+<p>Index một phần (partial index) chỉ chứa những dòng thoả điều kiện <code>WHERE</code>. Hai lớp "Toán 6A" cùng tồn tại được nếu ít nhất một lớp đã lưu trữ. Hai lớp đang mở trùng tên thì vẫn bị chặn. Bảng <code>books</code> có đúng vấn đề này với <code>isbn</code>.</p>
+
+<h2>Lưu vết: created_at và updated_at</h2>
+<p>"Hoá đơn này ai sửa, sửa lúc nào?" là câu hỏi sẽ đến, thường là khi có phụ huynh thắc mắc. Mức tối thiểu là hai cột thời gian. <code>DEFAULT now()</code> lo phần lúc tạo. Phần lúc sửa cần một trigger, vì <code>DEFAULT</code> chỉ chạy khi <code>INSERT</code>:</p>
+<pre><code>-- migrate:up
+CREATE FUNCTION set_updated_at() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$;
+
+ALTER TABLE books ADD COLUMN updated_at timestamptz NOT NULL DEFAULT now();
+
+CREATE TRIGGER books_set_updated_at
+  BEFORE UPDATE ON books
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- migrate:down
+DROP TRIGGER books_set_updated_at ON books;
+ALTER TABLE books DROP COLUMN updated_at;
+DROP FUNCTION set_updated_at();</code></pre>
+<p>Trigger <code>BEFORE UPDATE</code> chạy trước khi dòng được ghi, và được sửa <code>NEW</code>, tức là dòng sắp ghi. Code ứng dụng có quên đặt <code>updated_at</code> thì database vẫn đặt. Hàm <code>set_updated_at</code> dùng chung được cho mọi bảng, mỗi bảng chỉ cần một <code>CREATE TRIGGER</code>.</p>
+<p><code>now()</code> trả về thời điểm bắt đầu transaction, không phải thời điểm chạy câu lệnh. Mọi dòng sửa trong cùng một transaction có cùng <code>updated_at</code>. Thường đó lại chính là điều bạn muốn.</p>
+<p>Với tiền bạc, mức cao hơn là không bao giờ sửa: <code>payments</code> chỉ được thêm, không <code>UPDATE</code>, không <code>DELETE</code>. Ghi nhầm thì thêm một bản ghi điều chỉnh. Bạn sẽ làm việc này khi đối soát ở tuần 14.</p>
+
+<h2>Bài luyện Thứ Năm, phần hai</h2>
+<ol class="list">
+  <li>Migration đổi <code>books.author_id</code> sang <code>ON DELETE SET NULL</code>. Thêm 2 tác giả, 2 cuốn sách, 2 đánh giá. Xoá một tác giả, rồi xoá một cuốn có đánh giá, và xem kết quả.</li>
+  <li>Migration thêm <code>updated_at</code> và trigger cho <code>books</code>. <code>UPDATE</code> một cuốn, so <code>updated_at</code> với <code>created_at</code>.</li>
+  <li>Migration thêm <code>archived_at</code> cho <code>books</code>, thay <code>UNIQUE</code> trên <code>isbn</code> bằng index duy nhất một phần. Lưu trữ một cuốn rồi thêm lại cùng ISBN: phải được. Thêm lần thứ ba: phải bị chặn.</li>
+  <li>Chạy <code>down</code> migration vừa viết. Nó báo <code>could not create unique index "books_isbn_key"</code>. Giải thích vì sao vào notes. Thứ Bảy bạn sẽ gặp lại lỗi này với dữ liệu thật.</li>
+</ol>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"Cứ để ON DELETE CASCADE cho tiện, đỡ phải xoá bảng con trước."</span><span class="fix">CASCADE lan theo cả chuỗi khoá ngoại. Một lệnh xoá giáo viên có thể xoá sạch hoá đơn và thanh toán. Chỉ dùng khi dòng con vô nghĩa khi thiếu cha.</span></p>
+  <p><span class="wrong">"Xoá mềm thì không cần nghĩ tới UNIQUE."</span><span class="fix">Dòng đã lưu trữ vẫn tính vào UNIQUE thường. Dùng index duy nhất một phần với WHERE archived_at IS NULL.</span></p>
+  <p><span class="wrong">"updated_at để code ứng dụng tự đặt là được."</span><span class="fix">Code sẽ có chỗ quên, và lệnh UPDATE gõ tay trong psql thì chắc chắn quên. Trigger chạy với mọi đường ghi.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Bạn chọn ON DELETE CASCADE, SET NULL hay RESTRICT thế nào?</summary><div><p>Tôi hỏi: nếu dòng cha mất thì dòng con còn đúng không. Nếu dòng con vô nghĩa khi thiếu cha, như đánh giá của một cuốn sách, tôi dùng CASCADE. Nếu dòng con vẫn có nghĩa, tôi dùng SET NULL. Với dữ liệu quan trọng như hoá đơn và thanh toán, tôi để mặc định là chặn xoá, và dùng lưu trữ thay vì xoá.</p></div></details>
+  <details><summary>Xoá mềm có nhược điểm gì?</summary><div><p>Mọi truy vấn phải nhớ lọc dòng đã xoá, quên một chỗ là lộ dữ liệu cũ. Ràng buộc UNIQUE phải chuyển sang index một phần. Bảng lớn dần vì không bao giờ xoá thật. Và nó không đáp ứng được yêu cầu xoá dữ liệu cá nhân. Một cách khác là chuyển dòng sang bảng lưu trữ riêng, để bảng chính chỉ chứa dữ liệu đang dùng.</p></div></details>
+  <details><summary>Làm sao để updated_at luôn đúng?</summary><div><p>Dùng trigger BEFORE UPDATE trong database đặt NEW.updated_at bằng now(). Như vậy nó đúng với mọi đường ghi dữ liệu, kể cả câu lệnh gõ tay hay một service khác, không chỉ với code ứng dụng của mình.</p></div></details>
+</div>

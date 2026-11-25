@@ -1,0 +1,87 @@
+<h2>Tiền: số nguyên, đơn vị nhỏ nhất</h2>
+<p>Chạy hai câu này và so kết quả:</p>
+<pre><code>SELECT 0.1::float8 + 0.2::float8 = 0.3::float8;   -- false
+SELECT 0.1 + 0.2 = 0.3;                            -- true
+SELECT 0.1::float8 + 0.2::float8;                  -- 0.30000000000000004</code></pre>
+<p><code>float8</code> (double precision) lưu số ở hệ nhị phân. Giống 1/3 không viết chính xác được bằng số thập phân, 0,1 không viết chính xác được bằng nhị phân. Sai số nhỏ, nhưng tiền thì phải khớp tới từng đồng, và sai số cộng dồn qua hàng nghìn hoá đơn. Câu thứ hai đúng vì Postgres hiểu <code>0.1</code> viết trơn là <code>numeric</code>, kiểu số thập phân chính xác.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Kiểu</th><th>Khi nào dùng cho tiền</th></tr></thead>
+  <tbody>
+    <tr><td><code>bigint</code>, đơn vị nhỏ nhất</td><td>Mặc định. Tiền đồng không có phần lẻ, nên lưu thẳng số đồng. Với đô la thì lưu số cent: 19,90 USD lưu là <code>1990</code></td></tr>
+    <tr><td><code>numeric(12, 2)</code></td><td>Khi cần phần lẻ chính xác, như tỉ giá hay lãi suất. Chậm hơn số nguyên một chút</td></tr>
+    <tr><td><code>real</code>, <code>float8</code></td><td>Không bao giờ. Dành cho đo lường khoa học, toạ độ</td></tr>
+    <tr><td><code>money</code></td><td>Không. Cách hiển thị phụ thuộc vào cài đặt <code>lc_monetary</code> của server, và không lưu được loại tiền tệ</td></tr>
+  </tbody>
+</table></div>
+<p>Vì sao <code>bigint</code> mà không phải <code>integer</code>? <code>integer</code> dừng ở khoảng 2,1 tỉ. Một hoá đơn học phí không chạm tới mức đó, nhưng tổng thu cả năm của một trung tâm thì có. <code>SELECT 2147483647 + 1</code> báo lỗi <code>integer out of range</code>. Tiết kiệm 4 byte không đáng để phải nhớ cột nào an toàn, cột nào không.</p>
+
+<h2>Thời gian: thời điểm hay ngày lịch</h2>
+<div class="tbl"><table>
+  <thead><tr><th>Kiểu</th><th>Lưu cái gì</th><th>Trong hocphi</th></tr></thead>
+  <tbody>
+    <tr><td><code>timestamptz</code></td><td>Một thời điểm trên dòng thời gian, như nhau ở mọi nơi trên thế giới</td><td><code>payments.paid_at</code>, <code>created_at</code></td></tr>
+    <tr><td><code>date</code></td><td>Một ngày trên lịch, không có giờ</td><td><code>billing_month</code>, <code>joined_on</code></td></tr>
+    <tr><td><code>timestamp</code> (không tz)</td><td>Ngày giờ "trên đồng hồ treo tường", không biết ở múi giờ nào</td><td>Gần như không bao giờ dùng</td></tr>
+  </tbody>
+</table></div>
+<p>Cái tên gây hiểu lầm: <code>timestamptz</code> không lưu múi giờ. Nó đổi giá trị đầu vào về UTC rồi lưu. Khi đọc ra, nó đổi sang múi giờ của phiên làm việc. <code>timestamp</code> thì bỏ qua phần múi giờ của đầu vào:</p>
+<pre><code>SET timezone = 'Asia/Ho_Chi_Minh';
+SELECT timestamptz '2026-03-05 09:00:00+07',   -- 2026-03-05 09:00:00+07
+       timestamp   '2026-03-05 09:00:00+07';   -- 2026-03-05 09:00:00
+
+SET timezone = 'UTC';
+SELECT timestamptz '2026-03-05 09:00:00+07',   -- 2026-03-05 02:00:00+00: cùng thời điểm, hiển thị khác
+       timestamp   '2026-03-05 09:00:00+07';   -- 2026-03-05 09:00:00: không đổi, vì nó không biết +07 là gì</code></pre>
+<p>Server của bạn rất có thể chạy ở UTC. Container <code>postgres:18</code> mặc định là <code>Etc/UTC</code>. Đây là cái bẫy thật trong hocphi:</p>
+<pre><code>SET timezone = 'UTC';
+-- Phụ huynh chuyển khoản lúc 6:30 sáng ngày 1/4, giờ Việt Nam
+SELECT (timestamptz '2026-04-01 06:30:00+07')::date;                                 -- 2026-03-31
+SELECT (timestamptz '2026-04-01 06:30:00+07' AT TIME ZONE 'Asia/Ho_Chi_Minh')::date;  -- 2026-04-01</code></pre>
+<p>Câu đầu xếp khoản đóng đó vào tháng 3. Quy tắc: lưu bằng <code>timestamptz</code>, và khi cần biết "ngày nào" theo cách giáo viên hiểu, luôn ghi rõ <code>AT TIME ZONE 'Asia/Ho_Chi_Minh'</code>.</p>
+
+<h2>Chuỗi: text, giới hạn bằng CHECK</h2>
+<p>Trong PostgreSQL, <code>text</code> và <code>varchar(n)</code> được lưu giống hệt nhau, không cái nào nhanh hơn. <code>varchar(3)</code> chỉ thêm một giới hạn độ dài và báo <code>value too long for type character varying(3)</code>. Muốn nới giới hạn đó sau này là phải đổi kiểu cột. Cách gọn hơn:</p>
+<pre><code>name text NOT NULL CHECK (length(name) BETWEEN 1 AND 100)</code></pre>
+<p>Một ràng buộc <code>CHECK</code> có tên, đổi hay bỏ đều dễ, và nó còn chặn được chuỗi rỗng, điều <code>varchar</code> không làm được.</p>
+
+<h2>Trạng thái: ba cách lưu</h2>
+<p>Ví dụ: phụ huynh có thể ở trạng thái "đang hoạt động" hoặc "đã chặn tin nhắn".</p>
+<div class="tbl"><table>
+  <thead><tr><th>Cách</th><th>Viết</th><th>Ưu</th><th>Nhược</th></tr></thead>
+  <tbody>
+    <tr><td><code>text</code> và <code>CHECK</code></td><td><code>status text NOT NULL CHECK (status IN ('active', 'blocked'))</code></td><td>Đơn giản, thêm hay bớt giá trị chỉ cần thay CHECK</td><td>Danh sách giá trị nằm trong schema, không phải trong dữ liệu</td></tr>
+    <tr><td><code>ENUM</code></td><td><code>CREATE TYPE parent_status AS ENUM ('active', 'blocked')</code></td><td>Gọn, 4 byte, có thứ tự</td><td>Thêm giá trị thì dễ (<code>ALTER TYPE ... ADD VALUE</code>), bỏ một giá trị thì gần như phải làm lại kiểu</td></tr>
+    <tr><td>Bảng tra cứu</td><td><code>status_id</code> trỏ tới bảng <code>parent_statuses</code></td><td>Người dùng tự thêm được, mỗi giá trị có thêm tên hiển thị, màu</td><td>Thêm một phép nối ở mọi truy vấn</td></tr>
+  </tbody>
+</table></div>
+<p>Với hocphi: dùng <code>text</code> và <code>CHECK</code> khi danh sách cố định và do lập trình viên quyết định. Dùng bảng tra cứu khi giáo viên được tự đặt, như nhãn "học thử", "anh chị em".</p>
+<p>Trước khi thêm một cột trạng thái, hỏi: trạng thái này có tính ra được từ dữ liệu khác không? "Hoá đơn đã trả đủ" tính được từ tổng <code>payments</code>, như bạn đã làm ở tuần 3. Lưu thêm một cột <code>status</code> là tạo ra một nơi có thể lệch với sự thật.</p>
+<p>Một mẹo nhỏ: thay vì <code>is_archived boolean</code>, dùng <code>archived_at timestamptz</code>. <code>NULL</code> nghĩa là chưa lưu trữ, có giá trị nghĩa là đã lưu trữ, và bạn biết luôn lưu trữ lúc nào. Bạn sẽ dùng mẫu này hôm Thứ Năm.</p>
+
+<h2>jsonb: chỉ cho dữ liệu không có hình dạng cố định</h2>
+<p><code>jsonb</code> lưu được mọi thứ, và chính vì thế nó không bảo vệ được gì: không có <code>NOT NULL</code>, không có khoá ngoại, sai tên trường cũng không ai báo. Dùng nó cho dữ liệu bạn không kiểm soát hình dạng, như toàn bộ nội dung webhook ngân hàng gửi về ở tuần 14, để đối soát khi có tranh chấp. Không dùng nó cho số tiền, tên học sinh, hay bất cứ thứ gì bạn sẽ lọc và nối.</p>
+
+<h2>Bài luyện: 6 câu thử</h2>
+<p>Ghi dự đoán vào notes trước, chạy sau:</p>
+<ol class="list">
+  <li><code>SELECT 0.1::float8 * 3 = 0.3;</code></li>
+  <li><code>SELECT 19.9::float8 * 3;</code> và <code>SELECT 1990 * 3;</code></li>
+  <li><code>SELECT 2147483647 + 1;</code> rồi <code>SELECT 2147483647::bigint + 1;</code></li>
+  <li>Với <code>SET timezone = 'UTC'</code>: <code>SELECT (timestamptz '2026-04-01 06:30+07')::date;</code></li>
+  <li>Tạo bảng tạm có cột <code>varchar(3)</code>, chèn <code>'abcd'</code>. Rồi thử với <code>text CHECK (length(...) &lt;= 3)</code> và so hai thông báo lỗi.</li>
+  <li>Tạo cột <code>status text CHECK (status IN ('active', 'blocked'))</code>, chèn <code>'Active'</code>.</li>
+</ol>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"Tiền có phần lẻ thì dùng float."</span><span class="fix">float không biểu diễn chính xác 0,1. Lưu số nguyên theo đơn vị nhỏ nhất, hoặc dùng numeric.</span></p>
+  <p><span class="wrong">"timestamptz lưu kèm múi giờ."</span><span class="fix">Nó đổi về UTC rồi lưu, không nhớ múi giờ gốc. Múi giờ chỉ dùng lúc nhập và lúc hiển thị.</span></p>
+  <p><span class="wrong">"varchar(255) nhanh hơn text."</span><span class="fix">Trong PostgreSQL hai kiểu lưu như nhau. Con số 255 là thói quen từ database khác.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Bạn lưu số tiền bằng kiểu gì?</summary><div><p>Số nguyên theo đơn vị nhỏ nhất của tiền tệ, như đồng hoặc cent, trong cột bigint. Nếu cần phần lẻ chính xác thì dùng numeric. Tôi không dùng float vì nó không biểu diễn chính xác các số thập phân như 0,1, và sai số cộng dồn khi tính tổng. Nếu hệ thống có nhiều loại tiền, tôi lưu thêm cột mã tiền tệ bên cạnh.</p></div></details>
+  <details><summary>timestamp và timestamptz khác nhau thế nào, bạn dùng cái nào?</summary><div><p>timestamptz biểu diễn một thời điểm cụ thể: đầu vào có múi giờ được đổi về UTC để lưu, và đọc ra theo múi giờ của phiên. timestamp chỉ là ngày giờ trên đồng hồ, không biết thuộc múi giờ nào. Tôi dùng timestamptz cho mọi sự kiện đã xảy ra, như lúc thanh toán, và date cho ngày trên lịch. Khi cần biết sự kiện rơi vào ngày nào theo giờ địa phương, tôi đổi múi giờ một cách tường minh.</p></div></details>
+  <details><summary>Enum hay bảng tra cứu cho cột trạng thái?</summary><div><p>Nếu danh sách nhỏ, cố định và chỉ lập trình viên đổi, tôi dùng text với CHECK hoặc enum. Với PostgreSQL tôi nghiêng về CHECK vì bỏ một giá trị khỏi enum rất phiền. Nếu người dùng cần tự thêm giá trị hoặc mỗi giá trị có thêm thông tin như tên hiển thị, tôi dùng bảng tra cứu với khoá ngoại.</p></div></details>
+</div>

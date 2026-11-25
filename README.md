@@ -1,6 +1,6 @@
 # Lộ trình Product Engineer
 
-Web app học theo lộ trình 52 tuần, từ front-end developer lên product engineer. Trang chủ là bản đồ lộ trình 52 tuần; hiện đã soạn tuần 1, 2 và 3. Mỗi tuần có kế hoạch bốn buổi và 8 chủ đề. Mỗi chủ đề có video phát ngay trong trang, phần giải thích từ gốc, các lỗi hay nhầm, và câu hỏi phỏng vấn kèm cách trả lời.
+Web app học theo lộ trình 52 tuần, từ front-end developer lên product engineer. Trang chủ là bản đồ lộ trình 52 tuần; hiện đã soạn tuần 1 tới 4. Mỗi tuần có kế hoạch bốn buổi và 8 chủ đề. Mỗi chủ đề có video phát ngay trong trang, phần giải thích từ gốc, các lỗi hay nhầm, và câu hỏi phỏng vấn kèm cách trả lời.
 
 ## Chạy trên máy
 
@@ -47,7 +47,7 @@ src/
   content/
     types.ts                       ← kiểu dữ liệu Week, Topic, Video, Session
     roadmap.ts                     ← tên 5 giai đoạn và 52 tuần trên trang chủ
-    week-1.ts … week-3.ts          ← danh sách chủ đề, video, kế hoạch buổi
+    week-1.ts … week-4.ts          ← danh sách chủ đề, video, kế hoạch buổi
     week-N/*.html                  ← phần giải thích chi tiết của từng chủ đề
   lib/
     content.ts                     ← đọc nội dung lúc build
@@ -57,9 +57,9 @@ src/
 
 ## Thêm một tuần mới
 
-1. Tạo `src/content/week-4.ts` theo mẫu `week-3.ts`: 8 chủ đề, bốn buổi, mục tiêu.
-2. Tạo thư mục `src/content/week-4/` với một file `<slug>.html` cho mỗi chủ đề.
-3. Thêm `week4` vào mảng `weeks` trong `src/lib/content.ts`.
+1. Tạo `src/content/week-5.ts` theo mẫu `week-4.ts`: 8 chủ đề, bốn buổi, mục tiêu.
+2. Tạo thư mục `src/content/week-5/` với một file `<slug>.html` cho mỗi chủ đề.
+3. Thêm `week5` vào mảng `weeks` trong `src/lib/content.ts`.
 4. Chạy `npm run test:run`. Test sẽ báo nếu thiếu file nội dung, mã video sai định dạng, hay buổi học trỏ tới chủ đề không tồn tại.
 
 Mã video là 11 ký tự sau `v=` trong link YouTube. Nếu chủ sở hữu tắt chế độ nhúng, video sẽ không phát trong trang. Khi đó dùng link "Mở trên YouTube" ngay dưới khung video, hoặc thay bằng video khác.

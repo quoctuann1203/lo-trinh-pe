@@ -1,0 +1,217 @@
+<h2>Chuẩn bị repo hocphi</h2>
+<p>Từ tuần này, schema học phí sống trong repo <code>hocphi</code> bạn tạo ở tuần 2, cạnh code Next.js. Tuần 5 code sẽ đọc ghi database này. Thêm <code>compose.yaml</code> ở gốc repo:</p>
+<pre><code>services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: hocphi
+      POSTGRES_PASSWORD: hocphi       # chỉ dùng trên máy mình
+      POSTGRES_DB: hocphi
+    ports:
+      - "5433:5432"                   # 5432 để dành cho sql-practice
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hocphi -d hocphi"]
+      interval: 2s
+      retries: 15
+
+  dbmate:
+    image: ghcr.io/amacneil/dbmate:2.38.2
+    profiles: [tools]
+    environment:
+      DATABASE_URL: postgres://hocphi:hocphi@db:5432/hocphi?sslmode=disable
+    volumes:
+      - ./db:/db
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:</code></pre>
+<p>So với Thứ Năm, có thêm <code>healthcheck</code>: dbmate chỉ chạy khi Postgres đã nhận kết nối. Cổng ngoài là 5433 để chạy song song được với <code>sql-practice</code>. Rồi thêm vào phần <code>scripts</code> của <code>package.json</code>:</p>
+<pre><code>"db:start": "docker compose up -d --wait db",
+"db:new": "docker compose run --rm dbmate new",
+"db:migrate": "docker compose run --rm dbmate up",
+"db:rollback": "docker compose run --rm dbmate down",
+"db:status": "docker compose run --rm dbmate status",
+"db:seed": "docker compose exec -T db psql -U hocphi -d hocphi -v ON_ERROR_STOP=1 &lt; db/seed.sql",
+"db:check": "bash scripts/db-check.sh"</code></pre>
+<p>Truyền tên migration qua dấu <code>--</code>: <code>npm run db:new -- create_tuition</code>. Tên file của bạn sẽ có ngày giờ thật lúc chạy lệnh, không giống các ví dụ bên dưới.</p>
+
+<h2>Bước 1: migration nền</h2>
+<p>Migration đầu tiên là schema tuần 3, đúng như nó đang có. Chép 6 lệnh <code>CREATE TABLE</code> từ <code>tuition/schema.sql</code>, bỏ dòng <code>DROP TABLE</code> ở đầu, và viết phần down:</p>
+<pre><code>-- db/migrations/20261205090000_create_tuition.sql
+-- migrate:up
+CREATE TABLE teachers ( ... );
+CREATE TABLE classes ( ... );
+CREATE TABLE students ( ... );      -- vẫn còn cột parent_phone
+CREATE TABLE enrollments ( ... );
+CREATE TABLE invoices ( ... );
+CREATE TABLE payments ( ... );
+
+-- migrate:down
+DROP TABLE payments, invoices, enrollments, students, classes, teachers;</code></pre>
+<p>Tuần 3 bạn thêm index cho <code>payments.invoice_id</code> bằng tay. Giờ nó là migration thứ hai, tạo theo cách không chặn ghi:</p>
+<pre><code>-- db/migrations/20261205090100_index_payments_invoice_id.sql
+-- migrate:up transaction:false
+CREATE INDEX CONCURRENTLY payments_invoice_id_idx ON payments (invoice_id);
+
+-- migrate:down transaction:false
+DROP INDEX CONCURRENTLY payments_invoice_id_idx;</code></pre>
+<p>Chạy <code>npm run db:start</code> rồi <code>npm run db:migrate</code>. Tiếp theo nạp dữ liệu tuần 3, đúng file seed cũ:</p>
+<pre><code>docker compose exec -T db psql -U hocphi -d hocphi -v ON_ERROR_STOP=1 &lt; ../sql-practice/tuition/seed.sql</code></pre>
+<p>Seed cũ cho mỗi học sinh một số phụ huynh riêng. Ngoài đời thì anh chị em ruột có chung phụ huynh. Giả lập 200 cặp anh em: cứ học sinh thứ 10, 20, 30... dùng chung số với học sinh ngay trước đó.</p>
+<pre><code>UPDATE students
+SET parent_phone = '08' || lpad((id - 1)::text, 8, '0')
+WHERE id % 10 = 0;                                    -- UPDATE 200
+
+SELECT count(DISTINCT parent_phone) FROM students;    -- 1800</code></pre>
+<p>Từ đây, hãy coi database này là dữ liệu thật của giáo viên: không <code>DROP</code>, không chạy lại từ đầu. Mọi thay đổi đều phải đi qua migration.</p>
+
+<h2>Bước 2: tách phụ huynh, phần expand</h2>
+<p>Câu hỏi 4 của tuần 3, "phụ huynh nào nợ từ hai tháng trở lên", không trả lời đúng được khi phụ huynh chỉ là một chuỗi số điện thoại nằm trong <code>students</code>. Phụ huynh có hai con thì nợ của họ bị tách làm hai. Phụ huynh là một thực thể, nên cần bảng riêng. Đây là phần expand: thêm cấu trúc mới, chép dữ liệu sang, chưa bỏ gì.</p>
+<pre><code>-- db/migrations/20261205100000_create_parents.sql
+-- migrate:up
+SET LOCAL lock_timeout = '3s';
+
+CREATE TABLE parents (
+  id    bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  phone text NOT NULL UNIQUE,
+  name  text                                  -- chưa biết tên, giáo viên sẽ điền sau
+);
+
+ALTER TABLE students ADD COLUMN parent_id bigint REFERENCES parents (id);
+
+-- Backfill: mỗi số điện thoại khác nhau thành một phụ huynh
+INSERT INTO parents (phone)
+SELECT DISTINCT parent_phone
+FROM students
+WHERE parent_phone IS NOT NULL;
+
+UPDATE students s
+SET parent_id = p.id
+FROM parents p
+WHERE p.phone = s.parent_phone;
+
+CREATE INDEX students_parent_id_idx ON students (parent_id);
+
+-- migrate:down
+DROP INDEX students_parent_id_idx;
+ALTER TABLE students DROP COLUMN parent_id;
+DROP TABLE parents;</code></pre>
+<p>Vài điểm đáng nói khi thu âm hôm Chủ nhật:</p>
+<ul>
+  <li><strong>Cột <code>parent_id</code> được phép <code>NULL</code>.</strong> Học sinh chưa có số phụ huynh vẫn hợp lệ, như trong schema cũ.</li>
+  <li><strong>Dùng <code>CREATE INDEX</code> thường, không <code>CONCURRENTLY</code>.</strong> Cột vừa được tạo trong cùng transaction, chưa ai dùng nó, và bảng chỉ có 2.000 dòng. Trên bảng hàng triệu dòng, phải tách index ra một migration riêng.</li>
+  <li><strong>Phần down xoá được bảng <code>parents</code></strong> vì <code>parent_phone</code> vẫn còn nguyên. Expand luôn quay lại được.</li>
+</ul>
+<p>Chạy <code>npm run db:migrate</code>. Rồi kiểm tra không mất dữ liệu, bằng ba câu mà kết quả bạn biết trước:</p>
+<pre><code>SELECT count(*) FROM parents;                                   -- 1800: bằng số điện thoại khác nhau
+
+SELECT count(*) FROM students
+WHERE parent_phone IS NOT NULL AND parent_id IS NULL;           -- 0: không ai bị sót
+
+SELECT count(*) FROM students s
+JOIN parents p ON p.id = s.parent_id
+WHERE p.phone &lt;&gt; s.parent_phone;                                -- 0: không ai bị nối nhầm</code></pre>
+<p>Chép ba câu này và kết quả vào notes. Đây là bằng chứng bạn sẽ kể khi phỏng vấn: không chỉ "tôi chạy migration", mà "tôi chạy migration rồi chứng minh nó không làm mất dữ liệu".</p>
+
+<h2>Bước 3: lưu trữ lớp</h2>
+<p>Giáo viên muốn đóng lớp cũ mà vẫn giữ hoá đơn, và năm sau mở lại lớp cùng tên. Áp dụng đúng mẫu của Thứ Năm:</p>
+<pre><code>-- db/migrations/20261205110000_archive_classes.sql
+-- migrate:up
+ALTER TABLE classes ADD COLUMN archived_at timestamptz;
+
+ALTER TABLE classes DROP CONSTRAINT classes_teacher_id_name_key;
+CREATE UNIQUE INDEX classes_teacher_id_name_active_key
+  ON classes (teacher_id, name)
+  WHERE archived_at IS NULL;
+
+-- migrate:down
+DROP INDEX classes_teacher_id_name_active_key;
+ALTER TABLE classes ADD CONSTRAINT classes_teacher_id_name_key UNIQUE (teacher_id, name);
+ALTER TABLE classes DROP COLUMN archived_at;</code></pre>
+<p>Thử nghiệp vụ: lưu trữ "Lớp 1" của giáo viên 1, mở lại một "Lớp 1" mới, rồi thử mở thêm lần nữa.</p>
+<pre><code>UPDATE classes SET archived_at = now() WHERE id = 1;
+INSERT INTO classes (teacher_id, name, monthly_fee) VALUES (1, 'Lớp 1', 700000);   -- được
+INSERT INTO classes (teacher_id, name, monthly_fee) VALUES (1, 'Lớp 1', 700000);
+-- ERROR:  duplicate key value violates unique constraint "classes_teacher_id_name_active_key"</code></pre>
+
+<h2>Bước 4: bỏ cột cũ, phần contract</h2>
+<pre><code>-- db/migrations/20261206090000_drop_students_parent_phone.sql
+-- migrate:up
+ALTER TABLE students DROP COLUMN parent_phone;
+
+-- migrate:down
+ALTER TABLE students ADD COLUMN parent_phone text;
+
+UPDATE students s
+SET parent_phone = p.phone
+FROM parents p
+WHERE p.id = s.parent_id;</code></pre>
+<p>Ngoài đời, giữa bước 2 và bước 4 còn hai lần deploy code: một lần ghi vào cả hai nơi, một lần chỉ đọc từ <code>parents</code>. Hocphi chưa có code dùng database nên bạn làm liền. Nhưng hãy viết vào notes: khi tuần 5 có code thì màn hình thêm học sinh phải làm gì ở mỗi bước.</p>
+<p>Để ý phần down: nó dựng lại được cột, nhưng chỉ vì <code>parents.phone</code> còn giữ số điện thoại. Nếu bước 2 đã không chép dữ liệu sang, down của bước 4 sẽ trả lại một cột toàn <code>NULL</code>. Contract là bước duy nhất có thể làm mất dữ liệu, nên nó luôn đi sau cùng.</p>
+
+<h2>Thử down trên dữ liệu thật</h2>
+<p>Bây giờ chạy <code>npm run db:rollback</code> hai lần:</p>
+<pre><code>Rolling back: 20261206090000_drop_students_parent_phone.sql
+Rolled back: 20261206090000_drop_students_parent_phone.sql in 23ms
+
+Rolling back: 20261205110000_archive_classes.sql
+Error: pq: could not create unique index "classes_teacher_id_name_key" (23505)</code></pre>
+<p>Lần thứ hai thất bại vì lúc nãy bạn đã tạo hai "Lớp 1" cho giáo viên 1, một lớp đã lưu trữ. Dữ liệu đó hợp lệ với schema mới nhưng không hợp lệ với schema cũ. Trên database trống thì down chạy được, trên dữ liệu thật thì không. Kiểm tra <code>\d classes</code>: cột <code>archived_at</code> vẫn còn, vì transaction đã hoàn tác toàn bộ. Đây là lý do trên server thật người ta sửa lỗi bằng migration mới thay vì chạy down. Chạy lại <code>npm run db:migrate</code> để về trạng thái mới nhất.</p>
+
+<h2>Seed mới cho schema mới</h2>
+<p>File seed cũ không chạy được nữa, vì <code>students</code> không còn <code>parent_phone</code>. Viết <code>db/seed.sql</code> cho schema hiện tại. Phần giáo viên, lớp, ghi danh, hoá đơn, thanh toán giữ nguyên như tuần 3. Chỉ đổi phần học sinh:</p>
+<pre><code>-- 1.800 phụ huynh; phụ huynh 1 tới 200 có hai con
+INSERT INTO parents (phone)
+SELECT '08' || lpad(g::text, 8, '0')
+FROM generate_series(1, 1800) AS g;
+
+INSERT INTO students (name, parent_id)
+SELECT 'Học sinh ' || g, CASE WHEN g &lt;= 1800 THEN g ELSE g - 1800 END
+FROM generate_series(1, 2000) AS g;</code></pre>
+<p>Seed chạy sau migration, trên database vừa tạo: <code>npm run db:migrate</code> rồi <code>npm run db:seed</code>. Seed không phải migration: nó không có trong <code>schema_migrations</code> và không bao giờ chạy trên server thật.</p>
+
+<h2>Câu hỏi 4, lần này đúng</h2>
+<pre><code>-- Phụ huynh nợ từ hai tháng trở lên, gộp nợ của mọi con
+WITH thieu AS (
+  SELECT i.id, i.student_id, i.billing_month,
+         i.amount - COALESCE(SUM(p.amount), 0) AS con_thieu
+  FROM invoices i
+  LEFT JOIN payments p ON p.invoice_id = i.id
+  GROUP BY i.id
+  HAVING COALESCE(SUM(p.amount), 0) &lt; i.amount
+)
+SELECT pa.phone,
+       COUNT(DISTINCT t.billing_month) AS so_thang_no,
+       COUNT(DISTINCT s.id)            AS so_con,
+       SUM(t.con_thieu)                AS tong_thieu
+FROM thieu t
+JOIN students s  ON s.id = t.student_id
+JOIN parents  pa ON pa.id = s.parent_id
+GROUP BY pa.id
+HAVING COUNT(DISTINCT t.billing_month) &gt;= 2
+ORDER BY tong_thieu DESC;</code></pre>
+<p><code>WITH thieu AS (...)</code> là một CTE: đặt tên cho một truy vấn con để dùng như một bảng. Phần đầu tính số còn thiếu của từng hoá đơn, phần sau gộp theo phụ huynh. Viết bằng một <code>GROUP BY</code> duy nhất sẽ dính đúng lỗi "JOIN nhân bản dòng" của tuần 3, nhưng chỉ khi có hoá đơn được trả nhiều lần. Seed mỗi hoá đơn chỉ có tối đa một khoản đóng, nên lỗi chưa lộ ra. Thêm khoản đóng thứ hai cho một hoá đơn còn thiếu, như phụ huynh hay đóng làm hai lần. Rồi viết tổng nợ bằng một <code>GROUP BY</code> trên <code>invoices LEFT JOIN payments</code>, so với bản CTE, và giải thích chỗ lệch.</p>
+<p>Những dòng đầu kết quả thường là phụ huynh có <code>so_con = 2</code>. Đó chính là thông tin mà schema cũ che mất.</p>
+
+<h2>Cập nhật ERD</h2>
+<p>Thêm <code>parents</code> vào sơ đồ Mermaid của Thứ Ba, trong cùng commit với migration:</p>
+<pre><code>parents  |o--o{ students : "là phụ huynh của"</code></pre>
+<p>Ký hiệu <code>|o</code> ở đầu <code>parents</code> nghĩa là không hoặc một: học sinh có thể chưa có phụ huynh trong hệ thống, vì <code>parent_id</code> được phép <code>NULL</code>.</p>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"Tách bảng thì viết một migration: tạo bảng mới, chép dữ liệu, xoá cột cũ."</span><span class="fix">Gộp expand và contract làm một thì mất đường lui, và code cũ đang chạy sẽ lỗi ngay. Tách thành hai migration, có kiểm tra dữ liệu ở giữa.</span></p>
+  <p><span class="wrong">"Migration chạy không lỗi tức là dữ liệu đúng."</span><span class="fix">Một câu UPDATE nối nhầm điều kiện vẫn chạy không lỗi. Viết câu kiểm tra có kết quả biết trước, và chạy nó sau mỗi lần backfill.</span></p>
+  <p><span class="wrong">"Down chạy được trên database trống thì cũng chạy được trên production."</span><span class="fix">Dữ liệu tạo ra sau migration có thể không hợp lệ với schema cũ. Trên server thật, sửa bằng migration mới.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Kể về một lần bạn đổi schema trên một bảng đã có dữ liệu.</summary><div><p>Trong công cụ thu học phí, số điện thoại phụ huynh ban đầu nằm trong bảng học sinh, nên anh chị em ruột bị tính thành hai phụ huynh và không gộp được tiền nợ. Tôi tách phụ huynh ra bảng riêng bằng hai migration. Migration đầu tạo bảng parents, thêm cột parent_id được phép NULL, chép dữ liệu, và giữ nguyên cột cũ. Sau đó tôi chạy ba câu kiểm tra: số phụ huynh bằng số điện thoại khác nhau, không học sinh nào bị sót, không ai bị nối nhầm. Khi cả ba đều đúng, migration thứ hai mới xoá cột cũ.</p></div></details>
+  <details><summary>Dữ liệu mẫu và migration khác nhau thế nào?</summary><div><p>Migration mô tả cấu trúc và chạy ở mọi môi trường, kể cả production, đúng một lần cho mỗi file. Seed là dữ liệu giả để phát triển và kiểm thử, chỉ chạy trên máy mình hoặc môi trường test, và phải được viết lại khi schema đổi. Ngoại lệ là dữ liệu tra cứu mà ứng dụng cần để chạy, như danh sách trạng thái, có thể nằm trong migration.</p></div></details>
+  <details><summary>CTE là gì, khi nào bạn dùng?</summary><div><p>CTE là mệnh đề WITH, đặt tên cho một truy vấn con để dùng như một bảng trong truy vấn chính. Tôi dùng nó khi cần tổng hợp theo hai mức khác nhau, như tính số còn thiếu của từng hoá đơn rồi mới gộp theo phụ huynh. Nếu làm trong một GROUP BY, các phép nối sẽ nhân bản dòng và làm sai tổng. CTE cũng giúp truy vấn dài dễ đọc hơn, vì mỗi bước có một cái tên.</p></div></details>
+</div>

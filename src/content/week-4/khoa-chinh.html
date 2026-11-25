@@ -1,0 +1,68 @@
+<h2>Khoá chính phải làm được gì</h2>
+<p>Một cột hay một nhóm cột chỉ nên làm khoá chính khi nó đạt đủ bốn điều:</p>
+<ol class="list">
+  <li><strong>Duy nhất:</strong> không có hai dòng trùng.</li>
+  <li><strong>Luôn có giá trị:</strong> không bao giờ <code>NULL</code>.</li>
+  <li><strong>Không bao giờ đổi:</strong> vì mọi khoá ngoại trỏ vào nó.</li>
+  <li><strong>Gọn:</strong> nó được lặp lại trong mọi bảng con và mọi index trỏ tới.</li>
+</ol>
+<p>Điều thứ ba là điều người mới hay bỏ qua nhất.</p>
+
+<h2>Khoá tự nhiên và khoá thay thế</h2>
+<p>Khoá tự nhiên (natural key) là giá trị có sẵn ngoài đời, như số điện thoại, email, số căn cước. Khoá thay thế (surrogate key) là con số database tự sinh ra, không mang nghĩa gì.</p>
+<p>Thử dùng số điện thoại làm khoá chính của <code>teachers</code>. Ba tháng sau cô Lan đổi số. Lúc đó phải cập nhật khoá chính, rồi cập nhật mọi <code>classes.teacher_id</code>, mọi log, mọi link đã gửi qua Zalo có chứa số đó. Ngoài đời, giá trị "không bao giờ đổi" thường lại đổi: người ta đổi số, đổi email, sửa lỗi gõ.</p>
+<p>Cách làm thường dùng là kết hợp cả hai:</p>
+<pre><code>CREATE TABLE teachers (
+  id    bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,  -- khoá thay thế: không bao giờ đổi
+  name  text NOT NULL,
+  phone text NOT NULL UNIQUE                              -- khoá tự nhiên: vẫn duy nhất, nhưng đổi được
+);</code></pre>
+<p>Khoá thay thế dùng để nối bảng. <code>UNIQUE</code> trên khoá tự nhiên vẫn chặn hai giáo viên trùng số. Đổi số chỉ là một lệnh <code>UPDATE</code> trên một dòng.</p>
+
+<h2>Ba lựa chọn cho khoá thay thế</h2>
+<div class="tbl"><table>
+  <thead><tr><th></th><th><code>bigint IDENTITY</code></th><th>UUID v4</th><th>UUID v7</th></tr></thead>
+  <tbody>
+    <tr><td>Kích thước</td><td>8 byte</td><td>16 byte</td><td>16 byte</td></tr>
+    <tr><td>Ví dụ</td><td><code>12345</code></td><td><code>9b2c…e7f1</code>, ngẫu nhiên hoàn toàn</td><td><code>01a2…5a3e</code>, phần đầu là thời gian</td></tr>
+    <tr><td>Ghi vào index</td><td>Luôn ghi vào cuối cây, rất nhanh</td><td>Ghi rải rác khắp cây, index phình và chậm dần</td><td>Gần như luôn ghi vào cuối cây</td></tr>
+    <tr><td>Sinh ở đâu</td><td>Chỉ database sinh được</td><td>Bất kỳ đâu, không cần hỏi database</td><td>Bất kỳ đâu</td></tr>
+    <tr><td>Lộ thông tin</td><td>Đoán được id kế tiếp, đoán được bạn có bao nhiêu khách</td><td>Không lộ gì</td><td>Lộ thời điểm tạo</td></tr>
+    <tr><td>Trong PostgreSQL</td><td>Có từ lâu</td><td><code>gen_random_uuid()</code></td><td><code>uuidv7()</code>, mới có từ bản 18</td></tr>
+  </tbody>
+</table></div>
+<p>Thử trong psql:</p>
+<pre><code>SELECT uuidv7(), uuidv7();                      -- hai giá trị gần giống nhau ở phần đầu
+SELECT uuid_extract_timestamp(uuidv7());       -- đọc lại thời điểm tạo
+SELECT pg_column_size(1::bigint), pg_column_size(uuidv7());   -- 8 và 16</code></pre>
+<p>16 byte so với 8 byte nghe không đáng kể, nhưng nó nhân lên ở mọi khoá ngoại và mọi index. Bảng <code>payments</code> có hai vạn dòng thì không sao. Bảng log có một tỉ dòng thì đó là hàng chục GB.</p>
+
+<h2>"Lộ id" thật ra là vấn đề gì</h2>
+<p>Lý do hay được nêu để dùng UUID là: URL <code>/hoa-don/12345</code> cho phép kẻ xấu thử <code>/hoa-don/12346</code>. Nhưng nếu thử được mà xem được hoá đơn của người khác, lỗi nằm ở phân quyền, không nằm ở id. Đó là lỗi 403 bạn đã viết test ở tuần 2. UUID chỉ làm việc đoán khó hơn. Nó không thay được việc kiểm tra quyền ở mọi request.</p>
+<p>Lý do thật để giấu id tăng dần là thông tin kinh doanh: đối thủ đăng ký hai lần cách nhau một tháng là biết bạn có bao nhiêu khách mới. Điều này chỉ quan trọng với những id xuất hiện ra ngoài.</p>
+
+<h2>Lựa chọn cho hocphi</h2>
+<p>Dùng <code>bigint GENERATED ALWAYS AS IDENTITY</code> cho mọi bảng. Nó gọn, nhanh, dễ đọc khi debug ("hoá đơn 12345" dễ nói hơn một chuỗi 36 ký tự). Mọi id chỉ dùng trong trang quản lý của giáo viên, sau khi đã đăng nhập và kiểm tra quyền.</p>
+<p>Ở tuần 12 bạn sẽ gửi link phiếu thu cho phụ huynh, và phụ huynh không đăng nhập. Lúc đó link cần một mã không đoán được. Khi ấy thêm một cột, không đổi khoá chính:</p>
+<pre><code>ALTER TABLE invoices
+  ADD COLUMN public_id uuid NOT NULL DEFAULT uuidv7() UNIQUE;
+-- URL: /phieu-thu/01a2108f-53e5-71d7-b6e9-f5f4a3910e5a</code></pre>
+<p>Một mã có thể đoán được thời điểm tạo hoá đơn, nhưng không đoán được mã của hoá đơn khác. Thế là đủ cho phiếu thu. Nếu cần giấu cả thời điểm, dùng <code>gen_random_uuid()</code>.</p>
+
+<h2>Khoá ghép</h2>
+<p><code>enrollments</code> dùng khoá chính hai cột <code>(class_id, student_id)</code>. Đây là chỗ khoá ghép hợp lý nhất: bảng nối mà cặp hai id chính là danh tính của dòng. Nó tự chặn việc ghi danh một học sinh hai lần vào cùng một lớp.</p>
+<p>Cái giá là bảng nào trỏ tới nó phải mang cả hai cột, như <code>invoices</code> đang làm. Nếu sau này có ba bảng trỏ tới <code>enrollments</code>, có thể cân nhắc thêm cột <code>id</code> riêng và giữ <code>UNIQUE (class_id, student_id)</code>. Với hocphi lúc này thì chưa cần.</p>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"Số điện thoại là duy nhất, dùng làm khoá chính luôn cho gọn."</span><span class="fix">Duy nhất chưa đủ, khoá chính còn phải không bao giờ đổi. Dùng id tự sinh làm khoá chính, đặt UNIQUE trên số điện thoại.</span></p>
+  <p><span class="wrong">"Dùng UUID thì an toàn, người ngoài không xem được dữ liệu."</span><span class="fix">UUID chỉ làm id khó đoán. An toàn đến từ việc kiểm tra quyền ở mọi request.</span></p>
+  <p><span class="wrong">"Đã dùng UUID thì cứ gen_random_uuid() là được."</span><span class="fix">UUID ngẫu nhiên làm index khoá chính bị ghi rải rác. Trên PostgreSQL 18, nếu cần UUID làm khoá chính thì dùng uuidv7().</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Bạn chọn số tự tăng hay UUID làm khoá chính?</summary><div><p>Mặc định tôi dùng bigint identity: 8 byte, ghi index nhanh, dễ đọc khi debug. Tôi chọn UUID khi id phải được sinh ngoài database, như ở client chạy offline hoặc khi gộp dữ liệu từ nhiều nguồn, hoặc khi id lộ ra ngoài và không được để đoán số lượng. Khi đó tôi dùng UUID v7 vì nó tăng theo thời gian nên không làm index phân mảnh như v4. Nếu chỉ một vài id cần công khai, tôi thêm một cột UUID riêng và giữ khoá chính là bigint.</p></div></details>
+  <details><summary>Khoá tự nhiên và khoá thay thế khác nhau thế nào?</summary><div><p>Khoá tự nhiên là giá trị có nghĩa ngoài đời như email hay số điện thoại. Khoá thay thế là giá trị database tự sinh, không mang nghĩa. Tôi dùng khoá thay thế làm khoá chính vì giá trị ngoài đời thường thay đổi, và đổi khoá chính kéo theo mọi khoá ngoại. Khoá tự nhiên vẫn được bảo vệ bằng ràng buộc UNIQUE.</p></div></details>
+  <details><summary>Vì sao UUID v4 làm chậm việc ghi?</summary><div><p>Index B-tree sắp theo giá trị khoá. Với số tăng dần hay UUID v7, dòng mới luôn rơi vào trang cuối của cây, trang đó nằm sẵn trong bộ nhớ. Với UUID v4 ngẫu nhiên, mỗi dòng mới rơi vào một trang bất kỳ. Database phải đọc nhiều trang khác nhau, tách trang thường xuyên hơn, và index phình to hơn so với cùng lượng dữ liệu.</p></div></details>
+</div>
