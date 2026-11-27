@@ -1,0 +1,120 @@
+<h2>Một thao tác, nhiều câu SQL</h2>
+<p>Giáo viên mở lớp mới và thêm luôn 20 học sinh. Trong database đó là hai bước: tạo một dòng <code>classes</code>, rồi tạo 20 dòng <code>enrollments</code>. Giả sử bước hai lỗi ở học sinh thứ 13, vì id học sinh sai. Không có transaction thì lớp đã được tạo, 12 học sinh đã vào lớp, 8 học sinh thì không. Giáo viên bấm "thử lại" thì lỗi "lớp đã tồn tại". Không ai thiết kế trạng thái đó, nhưng nó nằm trong database của bạn.</p>
+<p>Transaction gói nhiều câu lệnh thành một đơn vị: hoặc tất cả có hiệu lực, hoặc không câu nào có.</p>
+<pre><code>BEGIN;
+INSERT INTO classes (teacher_id, name, monthly_fee) VALUES (1, 'Toán 9A', 800000) RETURNING id;
+INSERT INTO enrollments (class_id, student_id) VALUES (7, 1), (7, 2), (7, 999999);
+-- ERROR:  insert or update on table "enrollments" violates foreign key constraint
+ROLLBACK;
+-- Lớp 'Toán 9A' không còn: như chưa từng có gì xảy ra</code></pre>
+
+<h2>ACID, bằng lời thường</h2>
+<div class="tbl"><table>
+  <thead><tr><th>Chữ</th><th>Nghĩa</th><th>Trong hocphi</th></tr></thead>
+  <tbody>
+    <tr><td><strong>A</strong>tomicity</td><td>Tất cả hoặc không gì cả</td><td>Không có lớp nửa vời với 12 trên 20 học sinh</td></tr>
+    <tr><td><strong>C</strong>onsistency</td><td>Sau khi COMMIT, mọi ràng buộc vẫn đúng</td><td>Không có hoá đơn trỏ tới học sinh không học lớp đó</td></tr>
+    <tr><td><strong>I</strong>solation</td><td>Các transaction chạy cùng lúc không thấy dữ liệu dở dang của nhau</td><td>Giáo viên khác không thấy lớp đang được tạo dở. Bài sau đi sâu vào chữ này</td></tr>
+    <tr><td><strong>D</strong>urability</td><td>Đã COMMIT thì không mất, kể cả khi server tắt ngay sau đó</td><td>Khoản đóng đã báo "thành công" cho giáo viên thì nó còn đó</td></tr>
+  </tbody>
+</table></div>
+<p>PostgreSQL chạy mỗi câu lệnh lẻ trong một transaction riêng, tự động. Một câu <code>UPDATE</code> sửa 1.000 dòng sẽ sửa cả 1.000 hoặc không dòng nào. Bạn chỉ cần viết <code>BEGIN</code> khi muốn nhiều câu cùng chung số phận.</p>
+
+<h2>Lỗi giữa chừng thì sao</h2>
+<p>Thử trong psql: <code>BEGIN</code>, một câu lỗi, rồi một câu đúng.</p>
+<pre><code>BEGIN;
+INSERT INTO teachers (name, phone) VALUES ('Cô Lan', '0900000001');   -- số đã có: lỗi 23505
+SELECT 1;
+-- ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ROLLBACK;</code></pre>
+<p>Sau một lỗi, PostgreSQL từ chối mọi câu tiếp theo trong transaction đó cho tới khi bạn <code>ROLLBACK</code>. Gõ <code>COMMIT</code> lúc này cũng chỉ được kết quả <code>ROLLBACK</code>. Không có cách nào "bỏ qua lỗi rồi commit phần còn lại". Đó chính là atomicity.</p>
+
+<h2>Transaction trong Node: phải cùng một kết nối</h2>
+<p>Đây là lỗi hay gặp nhất khi mới dùng pool:</p>
+<pre><code>// SAI: mỗi pool.query có thể đi một kết nối khác
+await pool.query('BEGIN');
+await pool.query('INSERT INTO classes ...');
+await pool.query('INSERT INTO enrollments ...');
+await pool.query('COMMIT');</code></pre>
+<p>Transaction thuộc về một kết nối. <code>BEGIN</code> có thể chạy trên kết nối số 1, hai câu <code>INSERT</code> trên kết nối số 2 và 3, mỗi câu tự commit ngay. <code>COMMIT</code> lại rơi vào một kết nối khác nữa. Code chạy không lỗi, nhưng không có transaction nào cả. Tệ hơn, kết nối số 1 bị trả về pool khi đang mở dở một transaction, và request sau mượn phải nó.</p>
+<p>Cách đúng là mượn một kết nối, giữ nó suốt transaction, rồi trả lại. Viết một lần thành hàm dùng chung, để không ai phải nhớ thứ tự <code>BEGIN</code>, <code>COMMIT</code>, <code>ROLLBACK</code>, <code>release</code>:</p>
+<pre><code>// src/lib/db/tx.ts
+import type pg from 'pg';
+import { pool } from './pool';
+
+/** Thứ chạy được truy vấn: cả pool lẫn một kết nối đang trong transaction. */
+export type Db = pg.Pool | pg.PoolClient;
+
+export async function withTransaction&lt;T&gt;(fn: (tx: pg.PoolClient) =&gt; Promise&lt;T&gt;): Promise&lt;T&gt; {
+  const client = await pool.connect();
+  let broken = false;
+  try {
+    await client.query('BEGIN');
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      broken = true;      // ROLLBACK cũng lỗi: kết nối đã hỏng
+    }
+    throw err;
+  } finally {
+    client.release(broken);   // true: huỷ kết nối thay vì trả nó về pool
+  }
+}</code></pre>
+<p>Đọc từng phần:</p>
+<ul>
+  <li><strong><code>finally</code> luôn trả kết nối</strong>, dù thành công hay lỗi. Không có nó là rò kết nối, bài Thứ Ba.</li>
+  <li><strong><code>release(true)</code></strong> khi <code>ROLLBACK</code> cũng thất bại, thường vì mất kết nối mạng. Một kết nối như vậy không được trả về pool cho request khác dùng.</li>
+  <li><strong>Lỗi gốc luôn được ném tiếp.</strong> Người gọi cần biết vì sao transaction thất bại, để chọn trả 409 hay 500.</li>
+</ul>
+
+<h2>Hàm store nhận Db</h2>
+<p>Hàm store cần chạy được cả bên ngoài lẫn bên trong transaction. Cho nó nhận tham số <code>db</code>:</p>
+<pre><code>export async function createClass(db: Db, input: { teacherId: number; name: string; monthlyFee: number }) {
+  const { rows } = await db.query&lt;{ id: number }&gt;(
+    'INSERT INTO classes (teacher_id, name, monthly_fee) VALUES ($1, $2, $3) RETURNING id',
+    [input.teacherId, input.name, input.monthlyFee],
+  );
+  return rows[0].id;
+}
+
+export async function enroll(db: Db, classId: number, studentIds: number[]) {
+  await db.query(
+    'INSERT INTO enrollments (class_id, student_id) SELECT $1, unnest($2::bigint[])',
+    [classId, studentIds],
+  );
+}
+
+// Dùng: hai hàm, một transaction
+const classId = await withTransaction(async (tx) =&gt; {
+  const id = await createClass(tx, { teacherId, name: 'Toán 9A', monthlyFee: 800_000 });
+  await enroll(tx, id, studentIds);
+  return id;
+});</code></pre>
+<p><code>unnest($2::bigint[])</code> biến mảng thành nhiều dòng, nên 20 học sinh vào lớp chỉ bằng một câu lệnh. Một câu lệnh thì đã tự là một transaction, nhưng <code>createClass</code> với <code>enroll</code> là hai câu, nên vẫn cần <code>withTransaction</code>.</p>
+
+<h2>Giữ transaction ngắn</h2>
+<p>Trong lúc transaction còn mở, các dòng nó đã sửa bị khoá. Ai muốn sửa chúng phải chờ. Kết nối nó đang giữ cũng không cho ai khác mượn được. Vì vậy, bên trong <code>withTransaction</code> chỉ có các câu SQL:</p>
+<pre><code>// SAI: gọi mạng bên trong transaction
+await withTransaction(async (tx) =&gt; {
+  await recordPayment(tx, ...);
+  await sendZaloMessage(parentPhone, 'Đã nhận học phí');   // mất 2 giây, có khi 30 giây
+});</code></pre>
+<p>Nếu dịch vụ tin nhắn chậm 30 giây, hoá đơn đó bị khoá 30 giây và một kết nối của pool bị chiếm 30 giây. Còn nếu tin nhắn gửi đi rồi mà <code>COMMIT</code> lại lỗi, phụ huynh nhận tin "đã nhận tiền" cho một khoản không có trong database. Gửi tin sau khi transaction đã commit. Tuần 34 bạn sẽ học cách làm việc này chắc chắn hơn bằng hàng đợi.</p>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"Gọi pool.query('BEGIN') rồi các câu sau là nằm trong transaction."</span><span class="fix">Mỗi pool.query có thể dùng một kết nối khác. Mượn một client bằng pool.connect() và chạy mọi câu trên client đó.</span></p>
+  <p><span class="wrong">"Câu thứ hai lỗi thì COMMIT phần đã chạy được."</span><span class="fix">Sau một lỗi, PostgreSQL từ chối mọi câu cho tới khi ROLLBACK, và COMMIT cũng thành ROLLBACK. Muốn giữ một phần thì phải dùng SAVEPOINT, và hiếm khi cần.</span></p>
+  <p><span class="wrong">"Gói cả việc gửi email vào transaction cho chắc."</span><span class="fix">Transaction chỉ hoàn tác được dữ liệu trong database. Email đã gửi thì không lấy lại được, và trong lúc chờ mạng thì dòng bị khoá. Gửi sau khi commit.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Transaction là gì? Kể một chỗ bạn đã dùng.</summary><div><p>Transaction gói nhiều câu lệnh thành một đơn vị: hoặc tất cả có hiệu lực, hoặc không câu nào có. Trong công cụ học phí, tạo lớp và thêm học sinh vào lớp là hai câu INSERT. Tôi chạy chúng trong một transaction để nếu một học sinh không hợp lệ thì lớp cũng không được tạo, và giáo viên không bị kẹt với một lớp nửa vời.</p></div></details>
+  <details><summary>Bạn quản lý transaction thế nào khi dùng connection pool?</summary><div><p>Transaction gắn với một kết nối, nên tôi mượn một client từ pool, chạy BEGIN, các câu lệnh và COMMIT trên đúng client đó, ROLLBACK nếu có lỗi, và luôn trả client trong finally. Tôi gói việc này thành một hàm withTransaction nhận callback, để không ai phải tự viết lại và không ai lỡ dùng pool.query bên trong transaction.</p></div></details>
+  <details><summary>Vì sao nên giữ transaction ngắn?</summary><div><p>Vì trong lúc transaction mở, các dòng nó đã sửa bị khoá và một kết nối của pool bị chiếm. Transaction dài làm request khác phải chờ và có thể làm cạn pool. Tôi không gọi mạng ra ngoài bên trong transaction. Việc như gửi email chỉ làm sau khi commit, vì database không thể hoàn tác một email đã gửi.</p></div></details>
+</div>

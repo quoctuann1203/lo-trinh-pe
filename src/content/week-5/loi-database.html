@@ -1,0 +1,103 @@
+<h2>Một lỗi của PostgreSQL trông thế nào</h2>
+<p>Thêm hai cuốn sách cùng ISBN, rồi in ra lỗi mà <code>pg</code> ném:</p>
+<pre><code>try {
+  await pool.query("INSERT INTO books (title, author, isbn) VALUES ('Số đỏ', 'Vũ Trọng Phụng', '1')");
+  await pool.query("INSERT INTO books (title, author, isbn) VALUES ('Số đỏ', 'Vũ Trọng Phụng', '1')");
+} catch (err) {
+  console.log(err instanceof pg.DatabaseError);   // true
+  console.log(err.code);         // '23505'
+  console.log(err.constraint);   // 'books_isbn_key'
+  console.log(err.detail);       // 'Key (isbn)=(1) already exists.'
+  console.log(err.message);      // 'duplicate key value violates unique constraint "books_isbn_key"'
+}</code></pre>
+<p>Hai trường quan trọng nhất là <code>code</code> và <code>constraint</code>. <code>code</code> là mã SQLSTATE 5 ký tự, chuẩn chung của SQL, không đổi giữa các phiên bản. <code>constraint</code> là tên ràng buộc bị vi phạm. Đừng dựa vào <code>message</code>: nó là câu cho người đọc, có thể đổi theo phiên bản hoặc theo ngôn ngữ cài trên server.</p>
+
+<h2>Bảng chuyển mã</h2>
+<div class="tbl"><table>
+  <thead><tr><th>Mã</th><th>Tên</th><th>Xảy ra khi</th><th>Trả cho client</th></tr></thead>
+  <tbody>
+    <tr><td><code>23505</code></td><td>unique_violation</td><td>ISBN trùng, số điện thoại trùng</td><td>409, mã lỗi theo nghiệp vụ như <code>ISBN_TAKEN</code></td></tr>
+    <tr><td><code>23503</code></td><td>foreign_key_violation</td><td>Ghi hoá đơn cho học sinh không tồn tại, hoặc xoá lớp còn hoá đơn</td><td>422 nếu client gửi id sai, 409 nếu đang xoá thứ còn được dùng</td></tr>
+    <tr><td><code>23514</code></td><td>check_violation</td><td>Số tiền âm, năm 3000</td><td>422, nhưng lẽ ra zod phải chặn trước</td></tr>
+    <tr><td><code>23502</code></td><td>not_null_violation</td><td>Thiếu trường bắt buộc</td><td>500 và ghi log: zod và schema đang nói hai điều khác nhau</td></tr>
+    <tr><td><code>22P02</code></td><td>invalid_text_representation</td><td><code>/books/abc</code> đưa <code>'abc'</code> vào cột <code>bigint</code></td><td>Không để xảy ra: validate id trước khi gửi SQL</td></tr>
+    <tr><td><code>57014</code></td><td>query_canceled</td><td>Truy vấn chạy quá <code>statement_timeout</code></td><td>503</td></tr>
+    <tr><td><code>40001</code>, <code>40P01</code></td><td>serialization_failure, deadlock_detected</td><td>Hai transaction tranh nhau, bài Thứ Bảy</td><td>Thử lại cả transaction, hết lượt thì 503</td></tr>
+  </tbody>
+</table></div>
+<p>Để ý hai dòng ghi "lẽ ra phải chặn trước". Zod kiểm tra trước để trả về thông báo lỗi dễ hiểu cho từng trường. Ràng buộc trong database là hàng rào cuối cùng, cho những trường hợp code có lỗi hoặc có ai đó ghi thẳng vào database. Khi hàng rào cuối bị chạm, đó thường là dấu hiệu hai lớp đang không khớp nhau.</p>
+
+<h2>ISBN trùng: đừng hỏi trước, cứ ghi rồi bắt lỗi</h2>
+<p>Kho <code>Map</code> của tuần 1 có lẽ kiểm tra ISBN như thế này:</p>
+<pre><code>// Kiểm tra trước rồi mới ghi: có lỗ hổng
+const existing = await store.findByIsbn(input.isbn);
+if (existing) throw new AppError(409, 'ISBN_TAKEN', 'ISBN này đã có trong kho');
+return store.createBook(input);</code></pre>
+<p>Với <code>Map</code> trong một tiến trình Node, cách này đúng, vì không có <code>await</code> nào chen giữa lúc kiểm tra và lúc ghi. Với database thì có. Hai request cùng ISBN đến cùng lúc, cả hai cùng thấy "chưa có", cả hai cùng ghi. Không có UNIQUE thì bạn có hai cuốn trùng ISBN. Có UNIQUE thì request thứ hai nhận lỗi 23505, và vì bạn không bắt nó, client thấy lỗi 500.</p>
+<p>Cách đúng là bỏ câu hỏi trước, để database quyết định:</p>
+<pre><code>// src/db.ts
+export function isUniqueViolation(err: unknown, constraint: string): boolean {
+  return err instanceof pg.DatabaseError &amp;&amp; err.code === '23505' &amp;&amp; err.constraint === constraint;
+}</code></pre>
+<pre><code>// src/book-service.ts
+export async function createBook(input: NewBook) {
+  try {
+    return await store.createBook(input);
+  } catch (err) {
+    if (isUniqueViolation(err, 'books_isbn_key')) {
+      throw new AppError(409, 'ISBN_TAKEN', 'ISBN này đã có trong kho');
+    }
+    throw err;
+  }
+}</code></pre>
+<p>Hai chi tiết nhỏ mà quan trọng:</p>
+<ul>
+  <li><strong><code>return await</code>, không phải <code>return</code>.</strong> Viết <code>return store.createBook(input)</code> thì hàm trả Promise ra ngoài trước khi nó bị từ chối, và lỗi đi qua <code>catch</code> mà không bị bắt. Đây là bài "lỗi lan thế nào" của tuần 1.</li>
+  <li><strong>Kiểm tra cả tên ràng buộc.</strong> Sau này bảng có thêm UNIQUE khác, ví dụ trên một mã nội bộ. Chỉ nhìn <code>23505</code> thì bạn sẽ báo "ISBN trùng" cho một lỗi hoàn toàn khác.</li>
+</ul>
+<p>Làm y như vậy cho <code>updateBook</code>: PATCH đổi ISBN sang một ISBN đã có cũng phải trả 409.</p>
+
+<h2>Id không hợp lệ: chặn trước khi gửi SQL</h2>
+<p><code>GET /books/abc</code> đưa chuỗi <code>'abc'</code> vào <code>WHERE id = $1</code>. PostgreSQL báo <code>22P02 invalid input syntax for type bigint</code>, và client thấy lỗi 500. Với client, sách <code>abc</code> đơn giản là không tồn tại:</p>
+<pre><code>const BookId = z.coerce.number().int().positive();
+
+app.get('/books/:id', async (c) =&gt; {
+  const id = BookId.safeParse(c.req.param('id'));
+  if (!id.success) throw new AppError(404, 'NOT_FOUND', 'Không có sách này');
+  const book = await store.getBook(id.data);
+  if (!book) throw new AppError(404, 'NOT_FOUND', 'Không có sách này');
+  return c.json(book);
+});</code></pre>
+<p><code>.int()</code> của zod 4 chỉ nhận số nguyên an toàn, nên một id dài 30 chữ số cũng bị chặn ở đây, thay vì gây lỗi tràn số trong database. Viết test cho cả hai: <code>/books/abc</code> và <code>/books/999999999999999999999999</code> đều trả 404.</p>
+
+<h2>Lỗi không lường trước: 500, và không lộ gì</h2>
+<p>Lỗi database nào không được chuyển thành <code>AppError</code> sẽ rơi vào nhánh 500 của <code>app.onError</code> từ tuần 1. Giữ nguyên nguyên tắc: ghi log đầy đủ, trả về một thông báo chung chung. Đặc biệt đừng trả <code>err.detail</code>: nó chứa giá trị thật trong dòng bị lỗi, như <code>Key (phone)=(0901234567) already exists</code>. Đó là số điện thoại của người khác.</p>
+
+<h2>Database chết thì sao</h2>
+<p>Thêm một endpoint để biết app có nói chuyện được với database không:</p>
+<pre><code>app.get('/health', async (c) =&gt; {
+  try {
+    await pool.query('SELECT 1');
+    return c.json({ ok: true });
+  } catch (err) {
+    console.error('[health]', err);
+    return c.json({ ok: false }, 503);
+  }
+});</code></pre>
+<p>Thử: chạy <code>npm run dev</code>, gọi <code>curl -i localhost:3000/health</code>, rồi <code>docker compose stop db</code> và gọi lại. Bạn sẽ thấy 503. Bật lại database bằng <code>npm run db:start</code>, gọi lần nữa: 200, không cần khởi động lại app. Pool tự mở kết nối mới khi database sống lại. Khi deploy ở tuần 8, nền tảng hosting sẽ gọi endpoint này để biết bản app nào còn khoẻ.</p>
+<p>Thêm <code>statement_timeout: 5_000</code> vào cấu hình pool. Một truy vấn chạy quá 5 giây sẽ bị huỷ với mã <code>57014</code>, thay vì giữ kết nối mãi và làm cạn pool.</p>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"SELECT xem ISBN có chưa, chưa có thì INSERT. Thế là đủ chặn trùng."</span><span class="fix">Hai request cùng lúc đều thấy chưa có và cùng ghi. Để UNIQUE quyết định, rồi bắt lỗi 23505 theo đúng tên ràng buộc.</span></p>
+  <p><span class="wrong">"Kiểm tra err.message có chữ duplicate là được."</span><span class="fix">Message là câu cho người đọc và có thể đổi. Dùng err.code và err.constraint.</span></p>
+  <p><span class="wrong">"Trả nguyên err.detail cho client để dễ debug."</span><span class="fix">detail chứa giá trị thật trong dữ liệu, có thể là thông tin cá nhân của người khác. Ghi vào log, không trả ra ngoài.</span></p>
+  <p><span class="wrong">"Đã có ràng buộc trong database thì không cần validate bằng zod."</span><span class="fix">Cần cả hai. Zod cho thông báo lỗi theo từng trường mà client hiển thị được. Ràng buộc là lưới an toàn cuối cùng.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Làm sao chặn trùng email hay số điện thoại khi có nhiều request cùng lúc?</summary><div><p>Đặt ràng buộc UNIQUE trong database, rồi cứ ghi và bắt lỗi vi phạm, với PostgreSQL là mã 23505 kèm tên ràng buộc. Kiểm tra trước bằng SELECT không đủ, vì giữa lúc kiểm tra và lúc ghi, một request khác có thể đã ghi. Tôi vẫn có thể kiểm tra trước để hiện lỗi sớm trên form, nhưng quyết định cuối cùng thuộc về ràng buộc.</p></div></details>
+  <details><summary>Bạn chuyển lỗi database thành response HTTP thế nào?</summary><div><p>Ở lớp service, tôi bắt những lỗi tôi lường trước, dựa vào mã SQLSTATE và tên ràng buộc, rồi đổi thành lỗi nghiệp vụ có mã HTTP rõ ràng: trùng thì 409, tham chiếu tới thứ không tồn tại thì 422. Những lỗi còn lại rơi vào một chỗ xử lý chung, được ghi log đầy đủ và trả về 500 với thông báo chung chung, không lộ chi tiết của database.</p></div></details>
+  <details><summary>Validate ở ứng dụng hay ràng buộc ở database?</summary><div><p>Cả hai, mỗi bên một việc. Validate ở ứng dụng để trả lỗi sớm, rõ ràng cho từng trường. Ràng buộc ở database để dữ liệu đúng dù có lỗi trong code, có request chạy đồng thời, hay có người ghi thẳng vào database. Những quy tắc không bao giờ được sai, như số tiền dương hay không trùng, tôi luôn đặt trong database.</p></div></details>
+</div>

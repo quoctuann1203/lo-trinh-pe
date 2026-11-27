@@ -4,10 +4,11 @@ import { week1 } from '@/content/week-1';
 import { week2 } from '@/content/week-2';
 import { week3 } from '@/content/week-3';
 import { week4 } from '@/content/week-4';
+import { week5 } from '@/content/week-5';
 import type { Topic, Week } from '@/content/types';
 
 /** Các tuần đã soạn. Thêm tuần mới: tạo week-N.ts + thư mục week-N/ rồi thêm vào đây. */
-export const weeks: Week[] = [week1, week2, week3, week4];
+export const weeks: Week[] = [week1, week2, week3, week4, week5];
 
 export const TOTAL_WEEKS = 52;
 

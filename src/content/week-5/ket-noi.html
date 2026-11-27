@@ -1,0 +1,101 @@
+<h2>Driver là gì</h2>
+<p>PostgreSQL không nói HTTP. Nó có giao thức riêng chạy trên TCP: bắt tay, xác thực, gửi câu lệnh, nhận từng dòng kết quả. Driver là thư viện nói giao thức đó thay bạn. Với Node, driver phổ biến nhất là <code>pg</code>, còn gọi là node-postgres. Các ORM như Drizzle hay Prisma rốt cuộc cũng đi qua một driver như vậy.</p>
+<pre><code>npm install pg
+npm install -D @types/pg</code></pre>
+
+<h2>Một kết nối tốn bao nhiêu</h2>
+<p>Mỗi lần mở kết nối, Postgres tạo hẳn một tiến trình mới trên server, kiểm tra mật khẩu, cấp vài MB bộ nhớ. Trên máy bạn việc này mất vài mili-giây, qua mạng thật thì lâu hơn. Số kết nối cũng có giới hạn:</p>
+<pre><code>SHOW max_connections;      -- 100, giá trị mặc định</code></pre>
+<p>Nếu mỗi request mở một kết nối mới rồi đóng, bạn trả chi phí đó cho từng request. Lúc đông người, bạn chạm giới hạn 100 và request thứ 101 bị từ chối.</p>
+
+<h2>Pool: mượn rồi trả</h2>
+<p>Pool mở sẵn một số kết nối và giữ chúng lại. Khi cần chạy truy vấn, code mượn một kết nối rảnh, dùng xong thì trả về. Nếu cả pool đang bận, request mới xếp hàng chờ thay vì mở thêm.</p>
+<pre><code>// src/db.ts
+import pg from 'pg';
+
+export const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 10,                        // tối đa 10 kết nối mở cùng lúc
+  idleTimeoutMillis: 30_000,      // kết nối rảnh quá 30 giây thì đóng bớt
+  connectionTimeoutMillis: 5_000, // chờ mượn quá 5 giây thì báo lỗi, đừng treo mãi
+});
+
+// Kết nối đang rảnh trong pool cũng có thể bị đứt, ví dụ khi database khởi động lại.
+// Không lắng nghe sự kiện này thì lỗi đó làm sập cả tiến trình Node.
+pool.on('error', (err) =&gt; console.error('[pg pool]', err));</code></pre>
+<p>Mặc định <code>connectionTimeoutMillis</code> là 0, tức là chờ mãi. Khi database chết hay pool cạn, request của bạn treo không có hồi kết thay vì báo lỗi. Luôn đặt một con số.</p>
+
+<h2>pool.query và pool.connect</h2>
+<div class="tbl"><table>
+  <thead><tr><th>Cách gọi</th><th>Làm gì</th><th>Dùng khi</th></tr></thead>
+  <tbody>
+    <tr><td><code>pool.query(sql, values)</code></td><td>Mượn một kết nối, chạy một câu, tự trả lại</td><td>Gần như mọi lúc</td></tr>
+    <tr><td><code>const client = await pool.connect()</code></td><td>Mượn một kết nối và giữ nó cho tới khi bạn gọi <code>client.release()</code></td><td>Nhiều câu phải chạy trên cùng một kết nối, như transaction ở Thứ Bảy</td></tr>
+  </tbody>
+</table></div>
+<pre><code>const { rows, rowCount } = await pool.query('SELECT id, title FROM books WHERE id = $1', [id]);
+// rows: mảng object, mỗi object là một dòng. rowCount: số dòng trả về hoặc bị ảnh hưởng.</code></pre>
+<p>Quên gọi <code>client.release()</code> là lỗi rò kết nối. Lần đầu chẳng thấy gì. Sau 10 lần, pool hết kết nối để cho mượn và mọi request treo cho tới khi hết <code>connectionTimeoutMillis</code>. Vì vậy <code>release()</code> luôn nằm trong <code>finally</code>.</p>
+
+<h2>Chuỗi kết nối và file .env</h2>
+<pre><code>postgres://người_dùng:mật_khẩu@máy:cổng/tên_database
+postgres://hoc:hoc@localhost:5432/books</code></pre>
+<p>Chuỗi này có mật khẩu, nên nó nằm trong file <code>.env</code> không commit, còn <code>.env.example</code> chỉ ghi tên biến. Node từ bản 20.6 tự đọc được file <code>.env</code> qua cờ <code>--env-file</code>, không cần gói <code>dotenv</code>:</p>
+<pre><code>node --env-file=.env dist/index.js
+npx tsx --env-file=.env scripts/thu-pg.ts</code></pre>
+<p>Kiểm tra biến môi trường ngay lúc khởi động bằng zod như tuần 1. Thiếu <code>DATABASE_URL</code> thì app phải chết ngay với một thông báo rõ ràng, chứ không phải chạy được rồi mới báo lỗi ở request đầu tiên.</p>
+
+<h2>Bài đo: kết nối mới hay pool</h2>
+<p>Trong thư mục <code>sql-practice</code> của tuần 3, tạo một project Node nhỏ cạnh <code>compose.yaml</code>:</p>
+<pre><code>npm init -y
+npm install pg
+npm install -D tsx @types/pg
+echo 'DATABASE_URL=postgres://hoc:hoc@localhost:5432/books' &gt; .env</code></pre>
+<p>Đây là database <code>books</code> mà dbmate tạo ở tuần 4, có sẵn bảng <code>authors</code>, <code>books</code>, <code>reviews</code>. Thêm <code>.env</code> vào <code>.gitignore</code>, rồi viết <code>scripts/thu-pg.ts</code>:</p>
+<pre><code>import pg from 'pg';
+
+const url = process.env.DATABASE_URL;
+if (!url) throw new Error('Thiếu DATABASE_URL');
+
+// 1. Mỗi truy vấn một kết nối mới
+let t = performance.now();
+for (let i = 0; i &lt; 50; i++) {
+  const client = new pg.Client({ connectionString: url });
+  await client.connect();
+  await client.query('SELECT 1');
+  await client.end();
+}
+console.log('Kết nối mới:', Math.round(performance.now() - t), 'ms');
+
+// 2. Cùng 50 truy vấn qua pool
+const pool = new pg.Pool({ connectionString: url, max: 5 });
+t = performance.now();
+for (let i = 0; i &lt; 50; i++) await pool.query('SELECT 1');
+console.log('Pool:', Math.round(performance.now() - t), 'ms');
+
+// 3. 50 truy vấn cùng lúc, pool chỉ có 5 kết nối
+t = performance.now();
+await Promise.all(Array.from({ length: 50 }, () =&gt; pool.query('SELECT pg_sleep(0.1)')));
+console.log('50 truy vấn 0,1 giây cùng lúc, max 5:', Math.round(performance.now() - t), 'ms');
+
+await pool.end();</code></pre>
+<p>Thêm <code>"type": "module"</code> vào <code>package.json</code> để dùng được <code>await</code> ở cấp ngoài cùng, rồi chạy <code>npx tsx --env-file=.env scripts/thu-pg.ts</code>. Trước khi chạy, ghi vào notes dự đoán của bạn cho dòng thứ ba. Gợi ý: 50 truy vấn, mỗi lần chạy được 5 truy vấn song song, mỗi truy vấn 0,1 giây.</p>
+<p>Dòng cuối <code>await pool.end()</code> đóng mọi kết nối. Thiếu nó, script in xong kết quả nhưng không thoát, vì các kết nối còn mở giữ tiến trình sống. Trong server thì bạn không gọi <code>end()</code>, vì pool sống cùng tiến trình.</p>
+
+<h2>max bao nhiêu là vừa</h2>
+<p>Không phải càng to càng nhanh. Database chỉ có vài nhân CPU. 100 kết nối cùng chạy thì chúng tranh nhau CPU và đĩa, và từng truy vấn chậm đi. Một pool nhỏ xếp hàng ở phía Node thường cho tổng thời gian tốt hơn. Điểm khởi đầu hợp lý là 10.</p>
+<p>Điều cần nhớ là phép nhân: 3 bản app chạy song song, mỗi bản <code>max: 10</code>, là 30 kết nối. Trên serverless, mỗi lần hàm chạy có thể là một bản app mới với pool riêng, nên con số này tăng rất nhanh. Đó là lý do các dịch vụ Postgres cho serverless đều có thêm một bộ gom kết nối đứng trước, như PgBouncer. Tuần 8 khi deploy bạn sẽ gặp lại chuyện này.</p>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"Mở kết nối trong handler, xong thì đóng, cho sạch."</span><span class="fix">Mỗi request phải trả chi phí mở kết nối, và lúc đông người thì chạm giới hạn max_connections. Tạo một pool duy nhất khi app khởi động và dùng chung.</span></p>
+  <p><span class="wrong">"Pool max càng lớn thì càng chịu được nhiều người."</span><span class="fix">Database có giới hạn CPU và số kết nối. Pool vừa phải cộng hàng đợi thường nhanh hơn. Nhân max với số bản app đang chạy.</span></p>
+  <p><span class="wrong">"Không đặt connectionTimeoutMillis cũng được, mặc định chắc hợp lý."</span><span class="fix">Mặc định là 0, tức là chờ mãi. Khi pool cạn, request treo thay vì báo lỗi. Đặt vài giây.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Connection pool là gì, vì sao cần?</summary><div><p>Pool là một nhóm kết nối tới database được mở sẵn và dùng lại. Mở kết nối tới PostgreSQL tốn thời gian vì phải bắt tay TCP, xác thực và tạo một tiến trình mới trên server, và số kết nối có giới hạn. Với pool, mỗi request mượn một kết nối đang mở, chạy xong thì trả lại. Khi pool bận hết, request xếp hàng thay vì mở thêm, nên database không bị quá tải.</p></div></details>
+  <details><summary>Bạn chọn kích thước pool thế nào?</summary><div><p>Tôi bắt đầu nhỏ, khoảng 10, rồi đo. Database có số nhân CPU giới hạn, nên quá nhiều kết nối chạy cùng lúc làm từng truy vấn chậm đi. Tôi cũng nhân kích thước pool với số bản app đang chạy để chắc tổng không vượt max_connections của database, và chừa chỗ cho migration và công cụ quản trị. Nếu chạy serverless, tôi đặt một bộ gom kết nối như PgBouncer ở trước database.</p></div></details>
+  <details><summary>Lỗi rò kết nối là gì, bạn phát hiện thế nào?</summary><div><p>Là khi code mượn kết nối từ pool mà không trả lại, thường do quên release ở nhánh lỗi. Pool cạn dần, rồi mọi request đứng chờ cho tới khi hết thời gian. Tôi phòng bằng cách luôn release trong finally, hoặc gói việc mượn và trả vào một hàm dùng chung. Để phát hiện, tôi theo dõi số kết nối đang được mượn và số request đang chờ của pool, và đặt connectionTimeoutMillis để lỗi hiện ra thay vì treo im lặng.</p></div></details>
+</div>

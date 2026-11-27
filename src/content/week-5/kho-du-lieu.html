@@ -1,0 +1,156 @@
+<h2>Đoán trước khi chạy</h2>
+<p>Ghi vào notes kiểu JavaScript mà bạn nghĩ mỗi cột sẽ có, rồi mới chạy trên database <code>books</code> của <code>sql-practice</code>:</p>
+<pre><code>const { rows } = await pool.query(`
+  SELECT count(*)              AS so_sach,
+         sum(price)            AS tong_gia,
+         max(id)               AS id_lon_nhat,
+         1.5::numeric          AS so_le,
+         '2026-12-01'::date    AS ngay,
+         now()                 AS luc_nay,
+         ARRAY['a', 'b']       AS nhan
+  FROM books
+`);
+for (const [cot, giaTri] of Object.entries(rows[0])) {
+  console.log(cot, typeof giaTri, giaTri);
+}</code></pre>
+<p>Kết quả, với máy đặt múi giờ Việt Nam:</p>
+<div class="tbl"><table>
+  <thead><tr><th>Cột</th><th>Kiểu PostgreSQL</th><th>pg trả về</th><th>Vì sao</th></tr></thead>
+  <tbody>
+    <tr><td><code>so_sach</code></td><td><code>bigint</code></td><td>chuỗi <code>"4"</code></td><td><code>bigint</code> có thể lớn hơn <code>Number.MAX_SAFE_INTEGER</code>. pg không dám đổi thành số vì có thể làm sai giá trị</td></tr>
+    <tr><td><code>tong_gia</code></td><td><code>bigint</code></td><td>chuỗi</td><td><code>sum()</code> của <code>integer</code> ra <code>bigint</code></td></tr>
+    <tr><td><code>id_lon_nhat</code></td><td><code>bigint</code></td><td>chuỗi</td><td>Mọi khoá chính <code>bigint</code> đều về dạng chuỗi</td></tr>
+    <tr><td><code>so_le</code></td><td><code>numeric</code></td><td>chuỗi <code>"1.5"</code></td><td>Đổi sang <code>number</code> sẽ mất độ chính xác, đúng lỗi 0.1 + 0.2 của tuần 4</td></tr>
+    <tr><td><code>ngay</code></td><td><code>date</code></td><td><code>Date</code> lúc <code>2026-11-30T17:00:00.000Z</code></td><td>pg tạo <code>Date</code> lúc 0 giờ theo múi giờ của máy chạy Node. In ra theo giờ UTC thì thành ngày hôm trước</td></tr>
+    <tr><td><code>luc_nay</code></td><td><code>timestamptz</code></td><td><code>Date</code></td><td>Đúng thời điểm, không lệch</td></tr>
+    <tr><td><code>nhan</code></td><td><code>text[]</code></td><td>mảng <code>['a', 'b']</code></td><td>pg tự đổi qua lại giữa mảng PostgreSQL và mảng JavaScript</td></tr>
+  </tbody>
+</table></div>
+<p>Ba dòng đầu gây ra lỗi kinh điển:</p>
+<pre><code>const { rows: [{ so_sach }] } = await pool.query('SELECT count(*) AS so_sach FROM books');
+console.log(so_sach + 1);      // "41", không phải 5</code></pre>
+<p>Dòng ngày tháng còn nguy hiểm hơn, vì nó chỉ sai trên một số máy. Máy bạn ở UTC+7 và in bằng <code>toISOString()</code> thì thấy ngày 30/11. Server deploy ở UTC thì thấy đúng 1/12. Học phí "tháng 12" thành "tháng 11" tuỳ server đặt ở đâu.</p>
+
+<h2>Quyết định một lần, ở một chỗ</h2>
+<p><code>pg</code> cho phép đổi cách đọc từng kiểu bằng type parser. Đặt nó trong file tạo pool, để mọi truy vấn đều theo cùng một quy tắc:</p>
+<pre><code>// src/db.ts
+import pg from 'pg';
+
+const { builtins } = pg.types;
+
+// bigint thành number, nhưng báo lỗi nếu số quá lớn thay vì âm thầm làm sai.
+// Học phí tính bằng đồng: 9 triệu tỉ đồng mới chạm giới hạn, nên an toàn.
+pg.types.setTypeParser(builtins.INT8, (value) =&gt; {
+  const n = Number(value);
+  if (!Number.isSafeInteger(n)) throw new Error(`bigint vượt giới hạn của number: ${value}`);
+  return n;
+});
+
+// date giữ nguyên chuỗi '2026-12-01'. Không có giờ thì không có múi giờ để lệch.
+pg.types.setTypeParser(builtins.DATE, (value) =&gt; value);
+
+export const pool = new pg.Pool({ /* như bài trước */ });</code></pre>
+<p>Chạy lại bài đoán: <code>so_sach</code> giờ là số 4, <code>ngay</code> là chuỗi <code>'2026-12-01'</code>.</p>
+<p>Còn một bẫy. <code>sum()</code> của cột <code>bigint</code> trả về <code>numeric</code>, không phải <code>bigint</code>, nên nó vẫn là chuỗi. Với tiền trong hocphi, ép kiểu ngay trong SQL:</p>
+<pre><code>SELECT COALESCE(SUM(amount), 0)::bigint AS paid FROM payments WHERE invoice_id = $1;
+-- ::bigint để pg dùng parser INT8 ở trên, ra number</code></pre>
+<p><code>COALESCE(..., 0)</code> cũng cần: hoá đơn chưa có khoản đóng nào thì <code>SUM</code> trả <code>NULL</code>, không phải 0.</p>
+
+<h2>Lớp store</h2>
+<p>Ở tuần 1 bạn đã tách route, service và store. Store là nơi duy nhất biết dữ liệu nằm ở đâu và trông thế nào trong database. Bây giờ nó có thêm việc: đổi một dòng SQL thành object mà phần còn lại của app dùng.</p>
+<pre><code>// src/book-store.ts
+import { pool } from './db.js';
+
+export type Book = {
+  id: number;
+  title: string;
+  author: string;
+  isbn: string;
+  publishedYear: number | null;
+  tags: string[];
+  createdAt: string;
+};
+
+type BookRow = {
+  id: number;
+  title: string;
+  author: string;
+  isbn: string;
+  published_year: number | null;
+  tags: string[];
+  created_at: Date;
+};
+
+const COLUMNS = 'id, title, author, isbn, published_year, tags, created_at';
+
+function toBook(row: BookRow): Book {
+  return {
+    id: row.id,
+    title: row.title,
+    author: row.author,
+    isbn: row.isbn,
+    publishedYear: row.published_year,
+    tags: row.tags,
+    createdAt: row.created_at.toISOString(),
+  };
+}
+
+export async function getBook(id: number): Promise&lt;Book | null&gt; {
+  const { rows } = await pool.query&lt;BookRow&gt;(`SELECT ${COLUMNS} FROM books WHERE id = $1`, [id]);
+  return rows[0] ? toBook(rows[0]) : null;
+}</code></pre>
+<p>Vài điều đáng để ý:</p>
+<ul>
+  <li><strong>Liệt kê cột thay vì <code>SELECT *</code>.</strong> Thứ Bảy tuần trước bạn đã thêm, bỏ cột bằng migration. Với <code>SELECT *</code>, thêm một cột <code>internal_note</code> là nó lọt ra API ngay. Với danh sách cột, bạn phải chủ động thêm.</li>
+  <li><strong><code>pool.query&lt;BookRow&gt;</code> chỉ là lời hứa với TypeScript.</strong> pg không kiểm tra gì cả. Bạn viết sai tên cột thì TypeScript vẫn tin. Đó là lý do lớp store phải có test chạy trên database thật, bài Thứ Năm.</li>
+  <li><strong>Không tìm thấy thì trả <code>null</code>, không ném lỗi 404.</strong> Store không biết HTTP. Service hoặc route quyết định <code>null</code> nghĩa là 404.</li>
+  <li><strong>Hàm giờ là <code>async</code>.</strong> Kho <code>Map</code> của tuần 1 trả kết quả ngay. Kho PostgreSQL trả Promise, nên mọi chỗ gọi store phải thêm <code>await</code>. TypeScript sẽ chỉ ra những chỗ bạn quên, nếu bạn chạy <code>npm run typecheck</code>.</li>
+</ul>
+
+<h2>Thêm và sửa: RETURNING</h2>
+<pre><code>export async function createBook(input: NewBook): Promise&lt;Book&gt; {
+  const { rows } = await pool.query&lt;BookRow&gt;(
+    `INSERT INTO books (title, author, isbn, published_year, tags)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING ${COLUMNS}`,
+    [input.title, input.author, input.isbn, input.publishedYear ?? null, input.tags],
+  );
+  return toBook(rows[0]);
+}</code></pre>
+<p><code>RETURNING</code> trả về dòng vừa ghi, có cả <code>id</code> và <code>created_at</code> do database sinh. Không cần câu <code>SELECT</code> thứ hai. Để ý <code>?? null</code>: trường không gửi lên thì ghi rõ là <code>NULL</code>, để người đọc code không phải đoán <code>pg</code> làm gì với <code>undefined</code>.</p>
+<p>PATCH chỉ sửa những trường được gửi lên. Tên cột không thể là tham số, nên dùng lại cách danh sách cho phép của bài trước:</p>
+<pre><code>const PATCHABLE = {
+  title: 'title',
+  author: 'author',
+  isbn: 'isbn',
+  publishedYear: 'published_year',
+  tags: 'tags',
+} as const;
+
+export async function updateBook(id: number, patch: BookPatch): Promise&lt;Book | null&gt; {
+  const fields = (Object.keys(PATCHABLE) as (keyof typeof PATCHABLE)[]).filter(
+    (k) =&gt; patch[k] !== undefined,
+  );
+  // Schema zod của tuần 2 đã chặn body rỗng {}, nên fields luôn có ít nhất một phần tử.
+  const sets = fields.map((k, i) =&gt; `${PATCHABLE[k]} = $${i + 2}`);
+  const { rows } = await pool.query&lt;BookRow&gt;(
+    `UPDATE books SET ${sets.join(', ')} WHERE id = $1 RETURNING ${COLUMNS}`,
+    [id, ...fields.map((k) =&gt; patch[k])],
+  );
+  return rows[0] ? toBook(rows[0]) : null;
+}</code></pre>
+<p>Chuỗi được ghép vào SQL chỉ có tên cột lấy từ <code>PATCHABLE</code> và các chỗ trống <code>$2</code>, <code>$3</code>. Giá trị vẫn đi qua tham số.</p>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"count(*) trả về số, cộng thẳng được."</span><span class="fix">count(*) là bigint, pg mặc định trả chuỗi. "4" + 1 là "41". Đặt type parser cho INT8 hoặc ép kiểu trong SQL.</span></p>
+  <p><span class="wrong">"Cột date đọc ra Date của JavaScript, cứ dùng."</span><span class="fix">pg tạo Date lúc nửa đêm theo múi giờ của máy chạy Node, nên cùng một dòng cho ra ngày khác nhau trên máy khác nhau. Giữ date dạng chuỗi YYYY-MM-DD.</span></p>
+  <p><span class="wrong">"Đã ghi pool.query&lt;BookRow&gt; thì kiểu chắc chắn đúng."</span><span class="fix">Đó chỉ là lời hứa với TypeScript, không ai kiểm tra lúc chạy. Test trên database thật mới bắt được tên cột sai.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Vì sao node-postgres trả bigint về dạng chuỗi?</summary><div><p>Vì number của JavaScript chỉ biểu diễn chính xác số nguyên tới khoảng 9 triệu tỉ, còn bigint của PostgreSQL lớn hơn nhiều. Nếu tự đổi sang number, giá trị lớn sẽ bị làm tròn mà không ai biết. Thư viện chọn cách an toàn là trả chuỗi và để ứng dụng quyết định. Trong dự án học phí, tôi đổi bigint sang number ở một chỗ duy nhất, kèm kiểm tra Number.isSafeInteger để báo lỗi nếu có giá trị vượt giới hạn.</p></div></details>
+  <details><summary>Repository hay lớp store dùng để làm gì?</summary><div><p>Nó gom mọi chi tiết về lưu trữ vào một chỗ: câu SQL, tên cột snake_case, cách đổi kiểu. Phần nghiệp vụ chỉ làm việc với object có kiểu rõ ràng và không biết dữ liệu nằm ở PostgreSQL hay ở đâu. Nhờ vậy đổi cách lưu không đụng tới quy tắc nghiệp vụ, và quy tắc nghiệp vụ test được mà không cần database.</p></div></details>
+  <details><summary>Vì sao bạn không dùng SELECT * trong code ứng dụng?</summary><div><p>Vì kết quả của nó thay đổi mỗi khi schema thay đổi. Một cột mới, có thể là dữ liệu nội bộ, sẽ tự lọt ra API. Thứ tự và tên cột cũng không còn được ghi rõ trong code. Liệt kê cột giúp tôi thấy chính xác truy vấn trả về gì, và đọc ít dữ liệu hơn khi bảng có cột lớn.</p></div></details>
+</div>

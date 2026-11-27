@@ -1,0 +1,154 @@
+<h2>Bước 0: books-api có database riêng</h2>
+<p>API sách là một repo riêng, nên nó có Postgres riêng, giống cách bạn làm cho hocphi ở tuần 4. Cổng ngoài là 5434, để chạy song song được với <code>sql-practice</code> (5432) và <code>hocphi</code> (5433). Thêm <code>compose.yaml</code> ở gốc <code>books-api</code>:</p>
+<pre><code>services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: books
+      POSTGRES_PASSWORD: books        # chỉ dùng trên máy mình
+      POSTGRES_DB: books
+    ports:
+      - "5434:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U books -d books"]
+      interval: 2s
+      retries: 15
+
+  dbmate:
+    image: ghcr.io/amacneil/dbmate:2.38.2
+    profiles: [tools]
+    environment:
+      DATABASE_URL: postgres://books:books@db:5432/books?sslmode=disable
+    volumes:
+      - ./db:/db
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:</code></pre>
+<p>Script npm, giống hệt hocphi:</p>
+<pre><code>"db:start": "docker compose up -d --wait db",
+"db:new": "docker compose run --rm dbmate new",
+"db:migrate": "docker compose run --rm dbmate up",
+"db:test:prepare": "bash scripts/db-test-prepare.sh"</code></pre>
+<p>Migration đầu tiên khớp với schema zod của tuần 1. Trường nào zod cho phép thiếu thì cột đó được <code>NULL</code>. Trường nào zod bắt buộc thì cột đó <code>NOT NULL</code>. Hai nơi phải nói cùng một điều.</p>
+<pre><code>-- db/migrations/20261210090000_create_books.sql
+-- migrate:up
+CREATE TABLE books (
+  id             bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  title          text NOT NULL CHECK (length(trim(title)) &gt; 0),
+  author         text NOT NULL,
+  isbn           text NOT NULL,
+  published_year integer CHECK (published_year BETWEEN 1450 AND 2100),
+  tags           text[] NOT NULL DEFAULT '{}',
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT books_isbn_key UNIQUE (isbn)
+);
+
+-- migrate:down
+DROP TABLE books;</code></pre>
+<p>Ràng buộc UNIQUE được đặt tên rõ ràng, <code>books_isbn_key</code>. Bài sau, code sẽ dựa vào cái tên đó để biết lỗi nào là "ISBN trùng". Nếu tuần 1 bạn sinh id bằng <code>crypto.randomUUID()</code>, id giờ là số do database sinh. Test tuần 2 tạo sách qua API rồi dùng id trả về, nên chúng không phụ thuộc kiểu id.</p>
+<p>Thêm <code>DATABASE_URL=postgres://books:books@localhost:5434/books</code> vào <code>.env</code>, thêm <code>--env-file=.env</code> vào script <code>dev</code>, rồi chạy <code>npm run db:start</code> và <code>npm run db:migrate</code>. Sau đó viết lại <code>book-store.ts</code> theo bài lớp store của Thứ Ba.</p>
+
+<h2>Vì sao không giữ kho trong bộ nhớ cho test</h2>
+<p>Kho <code>Map</code> của tuần 1 chạy rất nhanh, nhưng nó không có những thứ bạn đang dựa vào. Nó không có UNIQUE, nên test "ISBN trùng trả 409" chỉ kiểm tra được đoạn code tự kiểm tra của bạn. Nó không có <code>CHECK</code>, không có khoá ngoại, không có transaction. Và nó không bắt được một tên cột viết sai trong SQL, vì với nó chẳng có SQL nào.</p>
+<p>Code càng dựa vào database để giữ dữ liệu đúng, test càng phải chạy trên database thật. Với API sách, gần như mọi thứ đều đi qua database, nên toàn bộ bộ test chạy trên PostgreSQL.</p>
+
+<h2>Database test riêng, dựng lại từ migration</h2>
+<p>Đừng chạy test trên database <code>books</code> bạn đang dùng để phát triển. Có ba lý do:</p>
+<ol class="list">
+  <li>Test xoá dữ liệu trước mỗi lần chạy. Dữ liệu bạn đang thử tay sẽ mất.</li>
+  <li>Database dev đã đi qua những lệnh bạn gõ tay trong psql. Test xanh trên đó không chứng minh được gì về migration.</li>
+  <li>Bạn sửa một migration nhưng quên chạy lại trên database dev, test vẫn chạy trên schema cũ. Đây chính là chuyện trong video: xoá một ràng buộc mà test vẫn xanh.</li>
+</ol>
+<p>Cách làm: database <code>books_test</code> riêng, xoá và dựng lại từ migration mỗi lần chạy test. Giống script <code>db:check</code> của tuần 4:</p>
+<pre><code>#!/usr/bin/env bash
+# scripts/db-test-prepare.sh
+set -euo pipefail
+
+TEST_URL='postgres://books:books@db:5432/books_test?sslmode=disable'
+dm() { docker compose run --rm -T -e DATABASE_URL="$TEST_URL" dbmate --no-dump-schema "$@"; }
+
+docker compose up -d --wait db
+dm drop
+dm up</code></pre>
+<p><code>--no-dump-schema</code> để dbmate không ghi đè <code>db/schema.sql</code> bằng bản của database test.</p>
+
+<h2>Nối Vitest với database test</h2>
+<pre><code>// vitest.config.ts
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+  test: {
+    env: {
+      DATABASE_URL: 'postgres://books:books@localhost:5434/books_test',
+    },
+    globalSetup: ['./test/global-setup.ts'],
+    setupFiles: ['./test/setup.ts'],
+    fileParallelism: false,
+  },
+});</code></pre>
+<div class="tbl"><table>
+  <thead><tr><th>Tuỳ chọn</th><th>Làm gì</th></tr></thead>
+  <tbody>
+    <tr><td><code>env</code></td><td>Đặt biến môi trường trước khi file test nào được import. <code>src/db.ts</code> đọc <code>DATABASE_URL</code> lúc import, nên nó tự trỏ vào <code>books_test</code></td></tr>
+    <tr><td><code>globalSetup</code></td><td>Chạy một lần trước toàn bộ test: dựng lại database test</td></tr>
+    <tr><td><code>setupFiles</code></td><td>Chạy trước mỗi file test, trong cùng tiến trình với file đó</td></tr>
+    <tr><td><code>fileParallelism: false</code></td><td>Chạy từng file một. Các file dùng chung một database, nên nếu chạy song song thì file này xoá dữ liệu của file kia</td></tr>
+  </tbody>
+</table></div>
+<pre><code>// test/global-setup.ts
+import { execSync } from 'node:child_process';
+
+export default function setup() {
+  execSync('npm run db:test:prepare', { stdio: 'inherit' });
+}</code></pre>
+<pre><code>// test/setup.ts
+import { afterAll } from 'vitest';
+import { pool } from '../src/db.js';
+
+// Đóng pool khi file test chạy xong, để tiến trình test thoát gọn.
+afterAll(() =&gt; pool.end());</code></pre>
+
+<h2>Dọn dữ liệu trước mỗi test</h2>
+<p>Ở tuần 2, <code>beforeEach(() =&gt; resetStore())</code> xoá kho trong bộ nhớ. Bây giờ nó xoá bảng:</p>
+<pre><code>// src/test-helpers.ts
+import { pool } from './db.js';
+
+export async function resetDb() {
+  await pool.query('TRUNCATE books RESTART IDENTITY CASCADE');
+}</code></pre>
+<pre><code>// src/books.test.ts
+beforeEach(() =&gt; resetDb());</code></pre>
+<p><code>TRUNCATE</code> nhanh hơn <code>DELETE</code> vì nó không xoá từng dòng. <code>RESTART IDENTITY</code> đưa bộ đếm id về 1, để id không phụ thuộc vào thứ tự chạy test. <code>CASCADE</code> xoá luôn các bảng trỏ tới <code>books</code>, khi sau này có thêm bảng con.</p>
+<p>Có một cách khác hay được nhắc: mở transaction trước mỗi test, rollback sau test. Cách đó chỉ chạy được khi test và code dùng chung đúng một kết nối. Code của bạn mượn kết nối từ pool, mỗi câu có thể đi một kết nối khác. Hôm Thứ Bảy, code còn tự mở transaction riêng. Vì vậy dùng <code>TRUNCATE</code>: đơn giản, và chỉ tốn vài mili-giây với bảng nhỏ.</p>
+
+<h2>Chạy, rồi cố tình làm hỏng</h2>
+<pre><code>npm test</code></pre>
+<p>Lần đầu bạn sẽ thấy dbmate in ra vài dòng, rồi test chạy. Test nào đỏ thì thường do một trong ba lý do:</p>
+<ul>
+  <li>Thiếu <code>await</code> ở chỗ gọi store, nên handler trả về một Promise thay vì dữ liệu.</li>
+  <li>Kiểu dữ liệu: test mong <code>publishedYear: 1941</code> nhưng nhận <code>"1941"</code>, hoặc mong id là chuỗi.</li>
+  <li>Thứ tự: <code>GET /books</code> không có <code>ORDER BY</code> thì PostgreSQL trả theo thứ tự nào cũng được. Kho <code>Map</code> luôn giữ thứ tự chèn, còn database thì không hứa điều đó. Thêm <code>ORDER BY id</code>.</li>
+</ul>
+<p>Khi đã xanh hết, làm bài kiểm tra chính bộ test. Xoá dòng <code>CONSTRAINT books_isbn_key UNIQUE (isbn)</code> khỏi migration, đừng chạy <code>db:migrate</code>, và chạy <code>npm test</code>. Test "ISBN trùng → 409" phải đỏ, vì database test được dựng lại từ migration đã sửa. Database dev thì vẫn còn UNIQUE. Nếu test chạy trên database dev, nó vẫn xanh và bạn không biết mình vừa làm hỏng gì. Trả dòng đó lại.</p>
+
+<h2>Còn CI thì sao</h2>
+<p>Máy <code>ubuntu-latest</code> của GitHub Actions có sẵn Docker và <code>docker compose</code>. Vì <code>globalSetup</code> tự bật database và dựng lại <code>books_test</code>, nếu books-api có <code>ci.yml</code> theo mẫu tuần 2 thì bước <code>npm run test:run</code> chạy được mà không cần sửa gì. Lần đầu sẽ chậm hơn vài chục giây vì phải tải image <code>postgres</code> và <code>dbmate</code>. Push lên và xem dấu xanh.</p>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"Chạy test trên database dev cho nhanh, khỏi dựng gì thêm."</span><span class="fix">Test sẽ xoá dữ liệu bạn đang dùng, và xanh trên một schema có thể khác hẳn migration. Dùng database test riêng, dựng lại từ migration.</span></p>
+  <p><span class="wrong">"Mock pool.query để test store cho nhanh."</span><span class="fix">Test đó chỉ kiểm tra rằng bạn gọi đúng chuỗi SQL bạn vừa viết. Nó không bắt được SQL sai, tên cột sai hay ràng buộc thiếu. Store phải được test trên database thật.</span></p>
+  <p><span class="wrong">"Không có ORDER BY thì database trả theo thứ tự chèn."</span><span class="fix">Không có gì đảm bảo điều đó. Sau khi sửa hay xoá dòng, thứ tự có thể đổi. Muốn thứ tự nào thì viết ORDER BY.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Bạn test code đọc ghi database thế nào?</summary><div><p>Tôi chạy integration test trên PostgreSQL thật, trong một database test riêng được xoá và dựng lại từ migration mỗi lần chạy test. Nhờ vậy test kiểm tra cả migration lẫn các ràng buộc như UNIQUE. Trước mỗi test tôi TRUNCATE các bảng, và các file test chạy lần lượt để không xoá dữ liệu của nhau. Logic thuần như tính học phí thì vẫn có unit test riêng, không cần database.</p></div></details>
+  <details><summary>Vì sao không mock database trong test?</summary><div><p>Vì phần dễ sai nhất chính là chỗ nói chuyện với database: câu SQL, tên cột, kiểu dữ liệu trả về, ràng buộc. Mock thay đúng phần đó bằng thứ tôi tự viết, nên test chỉ xác nhận lại giả định của tôi. Mock hợp với những thứ chậm hoặc nằm ngoài tầm kiểm soát, như API thanh toán bên thứ ba. Database thì chạy được trên máy và trong CI bằng Docker, nên tôi dùng bản thật.</p></div></details>
+  <details><summary>Làm sao để test dùng database không ảnh hưởng nhau?</summary><div><p>Mỗi test bắt đầu từ trạng thái sạch: tôi TRUNCATE bảng với RESTART IDENTITY trong beforeEach, và mỗi test tự tạo dữ liệu nó cần. Các file test chạy tuần tự vì chúng dùng chung database. Nếu bộ test lớn và chậm, có thể cho mỗi worker một database riêng để chạy song song lại.</p></div></details>
+</div>

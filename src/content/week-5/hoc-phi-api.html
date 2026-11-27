@@ -1,0 +1,414 @@
+<h2>Bước 1: hocphi nói chuyện với database</h2>
+<p>Từ tuần 4, database của hocphi chạy ở cổng 5433 và schema nằm trong <code>db/migrations</code>. Giờ đến lượt code Next.js đọc ghi nó.</p>
+<pre><code>npm install pg server-only
+npm install -D @types/pg</code></pre>
+<pre><code># .env.local, không commit
+DATABASE_URL=postgres://hocphi:hocphi@localhost:5433/hocphi
+DEV_TEACHER_ID=1</code></pre>
+<p>Thêm hai tên biến này, không có giá trị, vào <code>.env.example</code>. Next.js tự đọc <code>.env.local</code> khi chạy <code>next dev</code>. Biến không có tiền tố <code>NEXT_PUBLIC_</code> chỉ tồn tại trên server, nên mật khẩu database không bao giờ bị đưa xuống trình duyệt.</p>
+<p><code>DEV_TEACHER_ID</code> là chỗ tạm, cho tới khi có đăng nhập ở tuần 6. Mọi truy vấn từ hôm nay đã lọc theo giáo viên. Tuần sau bạn chỉ đổi chỗ lấy con số đó, không phải sửa câu SQL nào:</p>
+<pre><code>// src/lib/auth.ts
+import 'server-only';
+
+/** Tạm thời: tuần 6 thay bằng giáo viên lấy từ session đăng nhập. */
+export function currentTeacherId(): number {
+  const id = Number(process.env.DEV_TEACHER_ID);
+  if (!Number.isSafeInteger(id) || id &lt;= 0) throw new Error('Thiếu DEV_TEACHER_ID trong .env.local');
+  return id;
+}</code></pre>
+
+<h2>Bước 2: một pool cho cả app</h2>
+<pre><code>// src/lib/db/pool.ts
+import 'server-only';
+import pg from 'pg';
+
+const { builtins } = pg.types;
+pg.types.setTypeParser(builtins.INT8, (value) =&gt; {
+  const n = Number(value);
+  if (!Number.isSafeInteger(n)) throw new Error(`bigint vượt giới hạn của number: ${value}`);
+  return n;
+});
+pg.types.setTypeParser(builtins.DATE, (value) =&gt; value);
+
+function createPool() {
+  const pool = new pg.Pool({
+    connectionString: process.env.DATABASE_URL,
+    max: 10,
+    connectionTimeoutMillis: 5_000,
+    statement_timeout: 5_000,
+  });
+  pool.on('error', (err) =&gt; console.error('[pg pool]', err));
+  return pool;
+}
+
+// Khi chạy next dev, mỗi lần bạn lưu file, module này có thể được nạp lại.
+// Mỗi lần nạp lại là một pool mới, và pool cũ vẫn giữ kết nối, cho tới khi
+// Postgres báo "too many clients". Giữ pool trên globalThis để dùng lại.
+const g = globalThis as unknown as { hocphiPool?: pg.Pool };
+export const pool = g.hocphiPool ?? createPool();
+if (process.env.NODE_ENV === 'development') g.hocphiPool = pool;</code></pre>
+<ul>
+  <li><strong><code>import 'server-only'</code></strong> làm build báo lỗi ngay nếu một Client Component lỡ import file này. Không có nó, lỗi chỉ hiện ra lúc chạy, với một thông báo khó hiểu về module <code>net</code>.</li>
+  <li><strong>Next.js không đóng gói <code>pg</code></strong> vào bundle server. <code>pg</code> nằm sẵn trong danh sách <code>serverExternalPackages</code> mặc định, nên bạn không phải cấu hình gì.</li>
+  <li><strong>Chỉ giữ trên <code>globalThis</code> khi <code>NODE_ENV</code> là <code>development</code>.</strong> Khi chạy test, Vitest đặt <code>NODE_ENV</code> là <code>test</code>. Mỗi file test được một pool mới, và đóng nó khi file chạy xong.</li>
+</ul>
+<p>Chép <code>withTransaction</code> và kiểu <code>Db</code> từ bài transaction vào <code>src/lib/db/tx.ts</code>. Rồi thêm endpoint kiểm tra sức khoẻ:</p>
+<pre><code>// src/app/api/health/route.ts
+import { connection } from 'next/server';
+import { pool } from '@/lib/db/pool';
+
+export async function GET() {
+  await connection();    // luôn chạy lúc có request, không bao giờ được tạo sẵn lúc build
+  try {
+    await pool.query('SELECT 1');
+    return Response.json({ ok: true });
+  } catch (err) {
+    console.error('[health]', err);
+    return Response.json({ ok: false }, { status: 503 });
+  }
+}</code></pre>
+<p>Chạy <code>npm run db:start</code>, <code>npm run dev</code>, rồi <code>curl -i localhost:3000/api/health</code>.</p>
+
+<h2>Bước 3: danh sách hoá đơn trong tháng</h2>
+<p>Đây là câu hỏi 1 của tuần 3, giờ thành API. Store trước:</p>
+<pre><code>// src/lib/db/invoices.ts
+import 'server-only';
+import type { Db } from './tx';
+
+export type InvoiceSummary = {
+  id: number;
+  className: string;
+  studentName: string;
+  billingMonth: string;
+  amount: number;
+  paid: number;
+  remaining: number;
+};
+
+export async function listInvoices(db: Db, teacherId: number, month: string): Promise&lt;InvoiceSummary[]&gt; {
+  const { rows } = await db.query&lt;{
+    id: number; class_name: string; student_name: string;
+    billing_month: string; amount: number; paid: number;
+  }&gt;(
+    `SELECT i.id, c.name AS class_name, s.name AS student_name,
+            i.billing_month, i.amount,
+            COALESCE(SUM(p.amount), 0)::bigint AS paid
+     FROM invoices i
+     JOIN classes  c ON c.id = i.class_id
+     JOIN students s ON s.id = i.student_id
+     LEFT JOIN payments p ON p.invoice_id = i.id
+     WHERE c.teacher_id = $1 AND i.billing_month = $2
+     GROUP BY i.id, c.name, s.name
+     ORDER BY c.name, s.name`,
+    [teacherId, month],
+  );
+  return rows.map((r) =&gt; ({
+    id: r.id,
+    className: r.class_name,
+    studentName: r.student_name,
+    billingMonth: r.billing_month,
+    amount: r.amount,
+    paid: r.paid,
+    remaining: r.amount - r.paid,
+  }));
+}</code></pre>
+<p>Dòng <code>WHERE c.teacher_id = $1</code> quan trọng không kém câu SQL còn lại. Thiếu nó, giáo viên này thấy hoá đơn của mọi giáo viên khác. Đó là lỗi 403 hay 404 bạn đã viết test ở tuần 2, giờ nằm trong SQL.</p>
+<pre><code>// src/app/api/invoices/route.ts
+import type { NextRequest } from 'next/server';
+import { z } from 'zod';
+import { currentTeacherId } from '@/lib/auth';
+import { pool } from '@/lib/db/pool';
+import { listInvoices } from '@/lib/db/invoices';
+import { problem } from '@/lib/http';
+
+const Query = z.object({
+  month: z.iso.date().refine((d) =&gt; d.endsWith('-01'), 'Tháng phải là ngày mùng 1, ví dụ 2026-12-01'),
+});
+
+export async function GET(request: NextRequest) {
+  const query = Query.safeParse(Object.fromEntries(request.nextUrl.searchParams));
+  if (!query.success) {
+    return problem(422, 'VALIDATION', 'Tham số không hợp lệ', { details: z.flattenError(query.error) });
+  }
+  const invoices = await listInvoices(pool, currentTeacherId(), query.data.month);
+  return Response.json({ invoices });
+}</code></pre>
+<pre><code>// src/lib/http.ts: cùng định dạng lỗi với API sách tuần 1
+export function problem(status: number, code: string, message: string, extra: Record&lt;string, unknown&gt; = {}) {
+  return Response.json({ error: { code, message, ...extra } }, { status });
+}</code></pre>
+<p>Thử <code>curl 'localhost:3000/api/invoices?month=2026-12-01'</code>, rồi <code>month=2026-12-15</code> và <code>month=abc</code>. Hai cái sau phải trả 422.</p>
+
+<h2>Bước 4: ghi khoản đóng</h2>
+<p>Ghép mọi thứ của tuần này lại: tham số, transaction, khoá dòng, kiểm tra quyền, và bắt lỗi theo mã.</p>
+<pre><code>// src/lib/db/payments.ts
+import 'server-only';
+import { withTransaction } from './tx';
+
+export type Payment = { id: number; invoiceId: number; amount: number; paidAt: string };
+
+export type RecordPaymentResult =
+  | { kind: 'ok'; payment: Payment; remaining: number }
+  | { kind: 'not_found' }
+  | { kind: 'overpaid'; remaining: number };
+
+export async function recordPayment(input: {
+  teacherId: number;
+  invoiceId: number;
+  amount: number;
+}): Promise&lt;RecordPaymentResult&gt; {
+  return withTransaction(async (tx) =&gt; {
+    await tx.query("SET LOCAL lock_timeout = '3s'");
+
+    // 1. Khoá hoá đơn, đồng thời kiểm tra nó thuộc về giáo viên này
+    const invoice = await tx.query&lt;{ amount: number }&gt;(
+      `SELECT i.amount
+       FROM invoices i
+       JOIN classes c ON c.id = i.class_id
+       WHERE i.id = $1 AND c.teacher_id = $2
+       FOR UPDATE OF i`,
+      [input.invoiceId, input.teacherId],
+    );
+    if (invoice.rowCount === 0) return { kind: 'not_found' };
+
+    // 2. Đọc tổng đã đóng. Có khoá rồi nên không ai chen vào giữa bước 2 và bước 3
+    const { rows: [{ paid }] } = await tx.query&lt;{ paid: number }&gt;(
+      'SELECT COALESCE(SUM(amount), 0)::bigint AS paid FROM payments WHERE invoice_id = $1',
+      [input.invoiceId],
+    );
+    const remaining = invoice.rows[0].amount - paid;
+    if (input.amount &gt; remaining) return { kind: 'overpaid', remaining };
+
+    // 3. Ghi
+    const { rows: [row] } = await tx.query&lt;{ id: number; invoice_id: number; amount: number; paid_at: Date }&gt;(
+      `INSERT INTO payments (invoice_id, amount)
+       VALUES ($1, $2)
+       RETURNING id, invoice_id, amount, paid_at`,
+      [input.invoiceId, input.amount],
+    );
+    return {
+      kind: 'ok',
+      payment: { id: row.id, invoiceId: row.invoice_id, amount: row.amount, paidAt: row.paid_at.toISOString() },
+      remaining: remaining - input.amount,
+    };
+  });
+}</code></pre>
+<p>Vài điểm đáng nói khi thu âm hôm Chủ nhật:</p>
+<ul>
+  <li><strong><code>FOR UPDATE OF i</code></strong>: câu có <code>JOIN</code>, và <code>FOR UPDATE</code> trơn sẽ khoá cả dòng lớp học. Mọi khoản đóng của cả lớp sẽ phải xếp hàng chờ nhau. <code>OF i</code> chỉ khoá dòng hoá đơn.</li>
+  <li><strong>Hoá đơn của giáo viên khác trả <code>not_found</code></strong>, giống hệt hoá đơn không tồn tại. Trả 403 sẽ cho người lạ biết hoá đơn đó có thật.</li>
+  <li><strong>Hàm trả về kết quả có kiểu thay vì ném lỗi HTTP.</strong> Store không biết HTTP. TypeScript bắt route xử lý đủ ba trường hợp.</li>
+  <li><strong><code>return</code> bên trong callback</strong> vẫn đi qua <code>COMMIT</code>. Với <code>not_found</code> và <code>overpaid</code>, chưa có gì được ghi, nên commit cũng như rollback.</li>
+</ul>
+<pre><code>// src/app/api/invoices/[id]/payments/route.ts
+import pg from 'pg';
+import { z } from 'zod';
+import { currentTeacherId } from '@/lib/auth';
+import { recordPayment } from '@/lib/db/payments';
+import { problem } from '@/lib/http';
+
+const InvoiceId = z.coerce.number().int().positive();
+const Body = z.strictObject({ amount: z.number().int().positive() });
+
+export async function POST(request: Request, ctx: RouteContext&lt;'/api/invoices/[id]/payments'&gt;) {
+  const id = InvoiceId.safeParse((await ctx.params).id);
+  if (!id.success) return problem(404, 'NOT_FOUND', 'Không có hoá đơn này');
+
+  let json: unknown;
+  try {
+    json = await request.json();
+  } catch {
+    return problem(400, 'INVALID_JSON', 'Body không phải JSON hợp lệ');
+  }
+  const body = Body.safeParse(json);
+  if (!body.success) {
+    return problem(422, 'VALIDATION', 'Dữ liệu không hợp lệ', { details: z.flattenError(body.error) });
+  }
+
+  try {
+    const result = await recordPayment({ teacherId: currentTeacherId(), invoiceId: id.data, amount: body.data.amount });
+    switch (result.kind) {
+      case 'ok':
+        return Response.json({ payment: result.payment, remaining: result.remaining }, { status: 201 });
+      case 'not_found':
+        return problem(404, 'NOT_FOUND', 'Không có hoá đơn này');
+      case 'overpaid':
+        return problem(409, 'OVERPAYMENT', 'Số tiền lớn hơn số còn thiếu', { remaining: result.remaining });
+    }
+  } catch (err) {
+    if (err instanceof pg.DatabaseError &amp;&amp; err.code === '55P03') {
+      return problem(409, 'INVOICE_BUSY', 'Hoá đơn đang được cập nhật, thử lại sau ít giây');
+    }
+    throw err;
+  }
+}</code></pre>
+<p><code>RouteContext</code> là kiểu toàn cục do Next.js sinh ra khi chạy <code>next dev</code>, <code>next build</code> hoặc <code>next typegen</code>. Nếu TypeScript báo không tìm thấy nó, chạy <code>npx next typegen</code>. Thử bằng curl: đóng 100.000, đóng số lớn hơn số còn thiếu, đóng vào hoá đơn của giáo viên số 2.</p>
+
+<h2>Bước 5: test trên hocphi_test</h2>
+<p>Làm như API sách hôm Thứ Năm. Tạo <code>scripts/db-test-prepare.sh</code> với database <code>hocphi_test</code> và user <code>hocphi</code>, thêm script <code>db:test:prepare</code>, rồi sửa <code>vitest.config.mts</code>:</p>
+<pre><code>import { fileURLToPath } from 'node:url';
+import { defineConfig } from 'vitest/config';
+import react from '@vitejs/plugin-react';
+import tsconfigPaths from 'vite-tsconfig-paths';
+
+export default defineConfig({
+  plugins: [tsconfigPaths(), react()],
+  test: {
+    environment: 'jsdom',
+    env: {
+      DATABASE_URL: 'postgres://hocphi:hocphi@localhost:5433/hocphi_test',
+      DEV_TEACHER_ID: '1',
+    },
+    globalSetup: ['./test/global-setup.ts'],
+    setupFiles: ['./test/setup.ts'],
+    fileParallelism: false,
+    alias: {
+      // server-only cố tình báo lỗi khi bị import ngoài Next.js. Trong test, thay bằng file rỗng.
+      'server-only': fileURLToPath(new URL('./test/empty.ts', import.meta.url)),
+    },
+  },
+});</code></pre>
+<p>Tài liệu Next.js cũng dùng cách thay <code>server-only</code> bằng file rỗng trong hướng dẫn test với Jest. <code>test/empty.ts</code> chỉ cần một dòng <code>export {};</code>. <code>test/global-setup.ts</code> và <code>test/setup.ts</code> giống hệt API sách, chỉ đổi đường dẫn import pool thành <code>@/lib/db/pool</code>.</p>
+<pre><code>// test/db.ts
+import { pool } from '@/lib/db/pool';
+
+export async function resetDb() {
+  await pool.query(
+    'TRUNCATE payments, invoices, enrollments, students, parents, classes, teachers RESTART IDENTITY CASCADE',
+  );
+}
+
+/** Một giáo viên, một lớp, một học sinh, một hoá đơn. Giáo viên đầu tiên có id 1, khớp DEV_TEACHER_ID. */
+export async function seedInvoice({ amount = 700_000, phone = '0900000001' } = {}) {
+  const q = async (sql: string, values: unknown[]) =&gt; (await pool.query(sql, values)).rows[0];
+  const teacher = await q("INSERT INTO teachers (name, phone) VALUES ('Cô Lan', $1) RETURNING id", [phone]);
+  const cls = await q("INSERT INTO classes (teacher_id, name, monthly_fee) VALUES ($1, 'Toán 9A', $2) RETURNING id", [teacher.id, amount]);
+  const student = await q("INSERT INTO students (name) VALUES ('An') RETURNING id", []);
+  await q('INSERT INTO enrollments (class_id, student_id) VALUES ($1, $2)', [cls.id, student.id]);
+  const invoice = await q(
+    "INSERT INTO invoices (class_id, student_id, billing_month, amount) VALUES ($1, $2, '2026-12-01', $3) RETURNING id",
+    [cls.id, student.id, amount],
+  );
+  return { teacherId: teacher.id as number, invoiceId: invoice.id as number };
+}</code></pre>
+<pre><code>// @vitest-environment node
+// src/app/api/invoices/[id]/payments/route.test.ts
+import { beforeEach, describe, expect, test } from 'vitest';
+import { pool } from '@/lib/db/pool';
+import { resetDb, seedInvoice } from '../../../../../../test/db';
+import { POST } from './route';
+
+beforeEach(() =&gt; resetDb());
+
+function pay(invoiceId: number, body: unknown) {
+  const request = new Request(`http://test/api/invoices/${invoiceId}/payments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return POST(request, { params: Promise.resolve({ id: String(invoiceId) }) });
+}
+
+describe('POST /api/invoices/[id]/payments', () =&gt; {
+  test('đóng một phần → 201, trả số còn thiếu', async () =&gt; {
+    const { invoiceId } = await seedInvoice();
+    const res = await pay(invoiceId, { amount: 300_000 });
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ payment: { amount: 300_000 }, remaining: 400_000 });
+  });
+
+  test('đóng quá số còn thiếu → 409 OVERPAYMENT, không ghi gì', async () =&gt; {
+    const { invoiceId } = await seedInvoice();
+    const res = await pay(invoiceId, { amount: 800_000 });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatchObject({ code: 'OVERPAYMENT', remaining: 700_000 });
+    const { rowCount } = await pool.query('SELECT 1 FROM payments');
+    expect(rowCount).toBe(0);
+  });
+
+  test('hoá đơn của giáo viên khác → 404', async () =&gt; {
+    await seedInvoice();                                              // giáo viên 1
+    const other = await seedInvoice({ phone: '0900000002' });         // giáo viên 2
+    expect((await pay(other.invoiceId, { amount: 100_000 })).status).toBe(404);
+  });
+
+  test.each([0, -1, 1.5, '100000'])('amount = %s → 422', async (amount) =&gt; {
+    const { invoiceId } = await seedInvoice();
+    expect((await pay(invoiceId, { amount })).status).toBe(422);
+  });
+});</code></pre>
+<p>Đường dẫn import <code>test/db</code> dài vì file test nằm sâu trong <code>app/</code>. Nếu khó chịu, thêm alias <code>"@test/*": ["./test/*"]</code> vào <code>tsconfig.json</code>.</p>
+
+<h2>Bước 6: test 10 request cùng lúc</h2>
+<pre><code>test('10 request cùng lúc đóng đủ tiền → đúng 1 request thành công', async () =&gt; {
+  const { invoiceId } = await seedInvoice({ amount: 700_000 });
+
+  // Mở sẵn 10 kết nối. Nếu không, pool còn đang mở kết nối trong lúc các request
+  // tới, chúng tình cờ chạy lần lượt, và test có thể xanh dù không có khoá.
+  await Promise.all(Array.from({ length: 10 }, () =&gt; pool.query('SELECT 1')));
+
+  const responses = await Promise.all(Array.from({ length: 10 }, () =&gt; pay(invoiceId, { amount: 700_000 })));
+  const statuses = responses.map((r) =&gt; r.status);
+  expect(statuses.filter((s) =&gt; s === 201)).toHaveLength(1);
+  expect(statuses.filter((s) =&gt; s === 409)).toHaveLength(9);
+
+  const { rows: [{ paid }] } = await pool.query(
+    'SELECT COALESCE(SUM(amount), 0)::bigint AS paid FROM payments WHERE invoice_id = $1',
+    [invoiceId],
+  );
+  expect(paid).toBe(700_000);
+});</code></pre>
+<p>Rồi kiểm tra chính test này: xoá chữ <code>FOR UPDATE OF i</code> trong <code>recordPayment</code> và chạy lại. Khi thử trên PostgreSQL 18, không có khoá thì cả 10 request đều thành công và hoá đơn 700.000 nhận 7.000.000. Trả <code>FOR UPDATE OF i</code> lại, test xanh. Chép kết quả đỏ vào notes: đó là bằng chứng bạn sẽ kể khi phỏng vấn.</p>
+
+<h2>Bước 7: bấm hai lần không thành hai khoản đóng</h2>
+<p>Khoá dòng không giúp được khi cùng một request bị gửi hai lần: mạng chậm, giáo viên bấm lại, trình duyệt tự gửi lại. Cách làm của các dịch vụ thanh toán: client sinh một mã ngẫu nhiên cho mỗi lần đóng tiền và gửi kèm trong header <code>Idempotency-Key</code>. Server ghi mã đó cùng khoản đóng. Gặp lại mã cũ thì trả lại khoản đóng cũ thay vì ghi mới.</p>
+<pre><code>npm run db:new -- add_payments_request_id</code></pre>
+<pre><code>-- db/migrations/20261212150000_add_payments_request_id.sql
+-- migrate:up
+ALTER TABLE payments ADD COLUMN request_id uuid;
+ALTER TABLE payments ADD CONSTRAINT payments_request_id_key UNIQUE (request_id);
+
+-- migrate:down
+ALTER TABLE payments DROP COLUMN request_id;</code></pre>
+<p>Cột được phép <code>NULL</code>, vì các khoản đóng cũ không có mã, và UNIQUE cho phép nhiều <code>NULL</code>. Bảng nhỏ nên thêm UNIQUE trực tiếp là được. Với bảng hàng triệu dòng, bạn sẽ tạo index <code>CONCURRENTLY</code> trước, như tuần 4. Chạy <code>npm run db:migrate</code> và <code>npm run db:check</code>.</p>
+<p>Trong <code>recordPayment</code>, nhận thêm <code>requestId</code>, và thêm hai trường hợp <code>{ kind: 'replay'; payment: Payment }</code> và <code>{ kind: 'key_reused' }</code> vào <code>RecordPaymentResult</code>. Thêm hai nhánh tương ứng vào <code>switch</code> trong route. Để TypeScript nhắc bạn khi quên, thêm <code>default: return result satisfies never;</code> làm nhánh cuối. Ngay sau khi khoá hoá đơn, trước khi tính tổng, tìm xem mã đó đã được dùng chưa:</p>
+<pre><code>const existing = await tx.query&lt;{ id: number; invoice_id: number; amount: number; paid_at: Date }&gt;(
+  'SELECT id, invoice_id, amount, paid_at FROM payments WHERE request_id = $1',
+  [input.requestId],
+);
+if (existing.rows[0]) {
+  const row = existing.rows[0];
+  if (row.invoice_id !== input.invoiceId) return { kind: 'key_reused' };
+  return { kind: 'replay', payment: { id: row.id, invoiceId: row.invoice_id, amount: row.amount, paidAt: row.paid_at.toISOString() } };
+}
+// ... phần tính tổng giữ nguyên, rồi INSERT thêm cột request_id = $3</code></pre>
+<p>Thứ tự ở đây quan trọng. Kiểm tra mã phải đứng sau <code>FOR UPDATE</code>. Hai request cùng mã tới cùng lúc thì request thứ hai chờ ở khoá, rồi mới thấy mã đã có. Nếu kiểm tra mã trước khi khoá, cả hai cùng thấy "chưa có". Khi đó UNIQUE chặn lần ghi thứ hai với lỗi <code>23505</code>, và client nhận lỗi thay vì khoản đóng cũ. Vẫn bắt lỗi đó trong route và trả 409 <code>DUPLICATE_REQUEST</code>, phòng khi hai request cùng mã đi vào hai hoá đơn khác nhau.</p>
+<p>Trong route, đọc header trước khi đọc body:</p>
+<pre><code>const key = z.uuid().safeParse(request.headers.get('Idempotency-Key'));
+if (!key.success) return problem(400, 'IDEMPOTENCY_KEY_REQUIRED', 'Cần header Idempotency-Key dạng UUID');</code></pre>
+<div class="tbl"><table>
+  <thead><tr><th>Kết quả</th><th>Mã HTTP</th><th>Body</th></tr></thead>
+  <tbody>
+    <tr><td><code>ok</code></td><td>201</td><td>Khoản đóng mới và số còn thiếu</td></tr>
+    <tr><td><code>replay</code></td><td>200</td><td>Đúng khoản đóng đã ghi lần trước</td></tr>
+    <tr><td><code>key_reused</code></td><td>422</td><td><code>IDEMPOTENCY_KEY_REUSED</code>: mã này đã dùng cho hoá đơn khác</td></tr>
+    <tr><td><code>not_found</code>, <code>overpaid</code></td><td>404, 409</td><td>Như trước</td></tr>
+  </tbody>
+</table></div>
+<p>Sửa hàm <code>pay</code> trong test để luôn gửi <code>'Idempotency-Key': crypto.randomUUID()</code>, cho phép truyền mã vào khi cần. Thêm ba test: thiếu header trả 400; gửi hai lần cùng mã thì lần hai trả 200 với cùng <code>payment.id</code> và bảng <code>payments</code> chỉ có 1 dòng; gửi hai lần cùng mã <strong>cùng lúc</strong> bằng <code>Promise.all</code> thì kết quả là một 201 và một 200.</p>
+<p>Ở phía giao diện, mã được sinh một lần khi mở form đóng tiền, không phải mỗi lần bấm nút. Bấm lại sau lỗi mạng dùng lại mã cũ. Tuần 11 làm form bạn sẽ nối phần này.</p>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"Chưa có đăng nhập thì chưa cần lọc theo giáo viên."</span><span class="fix">Thêm teacher_id vào SQL từ đầu, lấy tạm từ biến môi trường. Thêm sau thì sẽ có một câu SQL bị quên.</span></p>
+  <p><span class="wrong">"Disable nút sau khi bấm là đủ chống bấm hai lần."</span><span class="fix">Nút disable không chặn được việc mạng gửi lại, tab thứ hai, hay app khác gọi API. Server phải tự nhận ra request trùng bằng idempotency key.</span></p>
+  <p><span class="wrong">"Hoá đơn của giáo viên khác thì trả 403 cho đúng nghĩa."</span><span class="fix">403 cho người lạ biết hoá đơn đó tồn tại. Với dữ liệu của người khác, trả 404 như thể nó không có.</span></p>
+  <p><span class="wrong">"Mỗi lần lưu file, next dev tạo pool mới cũng không sao."</span><span class="fix">Pool cũ vẫn giữ kết nối. Sau vài chục lần lưu, Postgres báo too many clients. Giữ pool trên globalThis khi chạy dev.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Kể cách bạn làm một endpoint ghi nhận thanh toán.</summary><div><p>Endpoint nhận id hoá đơn, số tiền và header Idempotency-Key. Sau khi validate, mọi thứ chạy trong một transaction: khoá dòng hoá đơn bằng SELECT FOR UPDATE, đồng thời kiểm tra hoá đơn thuộc về giáo viên đang đăng nhập; kiểm tra mã idempotency đã được dùng chưa; tính số còn thiếu; nếu số tiền không vượt quá thì ghi. Có ba lớp bảo vệ: khoá dòng chặn hai người ghi cùng lúc, idempotency key chặn một request bị gửi hai lần, và ràng buộc UNIQUE trên mã là lưới an toàn cuối cùng. Tôi có test gửi 10 request cùng lúc, và đã thấy test đó đỏ khi bỏ khoá.</p></div></details>
+  <details><summary>Idempotency là gì? Vì sao API thanh toán cần nó?</summary><div><p>Một thao tác idempotent cho cùng kết quả dù được gọi một lần hay nhiều lần. POST tạo thanh toán vốn không như vậy: gửi hai lần là hai khoản. Nhưng client luôn có lý do để gửi lại, như hết thời gian chờ mà không biết server đã ghi hay chưa. Client gửi kèm một mã duy nhất cho mỗi ý định thanh toán. Server lưu mã đó, nếu gặp lại thì trả về kết quả cũ thay vì ghi mới. Nhờ vậy client có thể thử lại an toàn.</p></div></details>
+  <details><summary>Một người dùng có xem được dữ liệu của người khác không? Bạn chặn ở đâu?</summary><div><p>Tôi chặn ngay trong câu truy vấn: mọi câu đọc ghi hoá đơn đều nối tới lớp học và lọc theo teacher_id của người đang đăng nhập. Hoá đơn của người khác vì vậy giống hệt hoá đơn không tồn tại, và tôi trả 404 để không lộ là nó có thật. Tôi có test tạo hai giáo viên và kiểm tra giáo viên này không ghi được vào hoá đơn của giáo viên kia.</p></div></details>
+</div>

@@ -1,0 +1,84 @@
+<h2>Lỗi bắt đầu từ một dấu nháy</h2>
+<p>Bạn cần ô tìm sách theo tên. Cách viết đầu tiên ai cũng nghĩ ra là ghép chuỗi:</p>
+<pre><code>// ĐỪNG viết thế này
+const q = c.req.query('q');
+const { rows } = await pool.query(`SELECT id, title FROM books WHERE title ILIKE '%${q}%'`);</code></pre>
+<p>Với <code>q = 'mèn'</code>, câu gửi đi là <code>... ILIKE '%mèn%'</code>, đúng như mong đợi. Nhưng <code>q</code> là thứ người dùng gõ, và người dùng gõ được dấu nháy. Database không biết phần nào bạn viết, phần nào người dùng gõ. Nó chỉ thấy một chuỗi SQL.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Người dùng gõ</th><th>Câu SQL database nhận được</th><th>Kết quả</th></tr></thead>
+  <tbody>
+    <tr><td><code>mèn</code></td><td><code>... ILIKE '%mèn%'</code></td><td>Đúng</td></tr>
+    <tr><td><code>Dế Mèn's</code></td><td><code>... ILIKE '%Dế Mèn's%'</code></td><td>Lỗi cú pháp, trang trắng</td></tr>
+    <tr><td><code>' OR true --</code></td><td><code>... ILIKE '%' OR true --%'</code></td><td>Trả về mọi dòng</td></tr>
+    <tr><td><code>'; DROP TABLE books; --</code></td><td><code>... ILIKE '%'; DROP TABLE books; --%'</code></td><td>Mất bảng</td></tr>
+  </tbody>
+</table></div>
+<p><code>--</code> là comment trong SQL, nên phần <code>%'</code> còn thừa bị bỏ qua. Dòng cuối chạy được thật với <code>pg</code>: khi câu lệnh không có tham số nào, <code>pg</code> gửi nó bằng chế độ cho phép nhiều câu cách nhau bởi dấu chấm phẩy.</p>
+
+<h2>Tự tay tấn công, trên bảng thử</h2>
+<p>Thêm vào <code>scripts/thu-pg.ts</code>, chạy trên database <code>books</code> của <code>sql-practice</code>:</p>
+<pre><code>await pool.query('CREATE TABLE IF NOT EXISTS thu_xoa (id int)');
+
+const q = "x'; DROP TABLE thu_xoa; --";
+await pool.query(`SELECT id, title FROM books WHERE title ILIKE '%${q}%'`);
+
+const { rows } = await pool.query("SELECT to_regclass('thu_xoa') AS bang");
+console.log('Bảng thu_xoa còn không:', rows[0].bang);   // null: mất rồi</code></pre>
+<p>Không có lỗi nào được báo. Câu <code>SELECT</code> chạy, rồi câu <code>DROP</code> chạy. Kẻ tấn công thật sẽ không xoá bảng, vì như vậy bạn biết ngay. Họ sẽ dùng <code>UNION SELECT</code> để đọc bảng khác mà bạn không hề hay biết, như trong video của Computerphile.</p>
+
+<h2>Cách sửa: tham số $1</h2>
+<pre><code>const { rows } = await pool.query(
+  'SELECT id, title FROM books WHERE title ILIKE $1',
+  [`%${q}%`],
+);</code></pre>
+<p>Câu lệnh và giá trị đi theo hai đường riêng. PostgreSQL phân tích câu <code>... ILIKE $1</code> trước, biết <code>$1</code> là một giá trị kiểu chuỗi. Sau đó mới nhận giá trị, và giá trị đó không bao giờ được đọc như SQL. Dấu nháy, dấu chấm phẩy, <code>DROP TABLE</code> đều chỉ là ký tự trong một chuỗi đang được tìm.</p>
+<p>Chạy lại bài tấn công với câu đã sửa: bảng <code>thu_xoa</code> còn nguyên, và câu tìm kiếm trả về 0 dòng. Thử thêm hai câu trong cùng một lệnh có tham số, <code>pool.query('SELECT $1::int; SELECT 2', [1])</code>, sẽ thấy lỗi <code>cannot insert multiple commands into a prepared statement</code>. Có tham số thì mỗi lệnh chỉ được một câu.</p>
+<p>Quy tắc rất đơn giản: <strong>giá trị đến từ bên ngoài luôn đi qua <code>$1</code>, <code>$2</code>, …</strong>. Bên ngoài là query string, body, header, cookie, và cả dữ liệu đọc ra từ database mà người dùng từng nhập.</p>
+
+<h2>Những chỗ tham số không làm được</h2>
+<h3>Tên cột, tên bảng, chiều sắp xếp</h3>
+<p>Tham số chỉ thay được giá trị, không thay được tên. Viết <code>ORDER BY $1</code> với <code>$1 = 'title'</code> không báo lỗi, nhưng nó sắp xếp theo chuỗi hằng <code>'title'</code>, giống nhau ở mọi dòng, tức là không sắp xếp gì cả. Muốn người dùng chọn cách sắp xếp, dùng danh sách cho phép:</p>
+<pre><code>const SORT = {
+  title: 'title ASC',
+  newest: 'created_at DESC',
+  year: 'year DESC NULLS LAST',
+} as const;
+
+const Query = z.object({
+  q: z.string().trim().max(100).default(''),
+  sort: z.enum(['title', 'newest', 'year']).default('newest'),
+});
+
+const { q, sort } = Query.parse(c.req.query());
+const { rows } = await pool.query(
+  `SELECT id, title FROM books WHERE title ILIKE $1 ORDER BY ${SORT[sort]} LIMIT 50`,
+  [`%${q}%`],
+);</code></pre>
+<p>Ở đây vẫn có ghép chuỗi, nhưng thứ được ghép là một trong ba chuỗi bạn tự viết sẵn. Người dùng chỉ chọn được chìa khoá, zod chặn mọi chìa khoá khác.</p>
+
+<h3>Danh sách IN</h3>
+<p>Không viết <code>IN ($1)</code> với một mảng. Dùng <code>= ANY($1)</code>: <code>pg</code> tự đổi mảng JavaScript thành mảng PostgreSQL.</p>
+<pre><code>await pool.query('SELECT id, title FROM books WHERE id = ANY($1)', [[1, 2, 3]]);</code></pre>
+
+<h3>Ký tự đặc biệt của LIKE</h3>
+<p>Tham số chặn được injection, nhưng trong <code>LIKE</code> thì <code>%</code> và <code>_</code> vẫn là ký tự đại diện. Người dùng tìm "50%" sẽ khớp cả "50 năm". Không nguy hiểm, nhưng sai. Thêm dấu <code>\</code> trước các ký tự đó:</p>
+<pre><code>const escapeLike = (s: string) =&gt; s.replace(/[\\%_]/g, (ch) =&gt; '\\' + ch);
+await pool.query('SELECT id, title FROM books WHERE title ILIKE $1', [`%${escapeLike(q)}%`]);</code></pre>
+
+<h2>ORM và thư viện query builder có an toàn không</h2>
+<p>Drizzle, Prisma, Kysely và các thư viện kiểu tagged template như <code>sql`... ${q}`</code> đều tự biến giá trị thành tham số. Đó là lý do người ta thích chúng. Nhưng thư viện nào cũng có một cửa thoát để viết SQL thô, như <code>sql.raw()</code> hay <code>$queryRawUnsafe()</code>. Chữ <code>raw</code> hay <code>unsafe</code> trong tên hàm là lời cảnh báo: qua cửa này bạn lại tự chịu trách nhiệm như khi ghép chuỗi.</p>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"Thay dấu nháy đơn bằng hai dấu nháy là chặn được injection."</span><span class="fix">Tự escape là cuộc chơi bạn sẽ thua: bảng mã, ký tự đặc biệt, cấu hình server. Dùng tham số, để database tự tách giá trị khỏi câu lệnh.</span></p>
+  <p><span class="wrong">"Đã validate bằng zod rồi thì ghép chuỗi cũng không sao."</span><span class="fix">Zod kiểm tra hình dạng dữ liệu. Một tên sách hợp lệ vẫn có thể chứa dấu nháy. Validate và tham số là hai lớp khác nhau, cần cả hai.</span></p>
+  <p><span class="wrong">"Cho người dùng chọn cột sắp xếp: ORDER BY $1."</span><span class="fix">Tham số không thay được tên cột. Câu đó không lỗi nhưng không sắp xếp gì. Dùng danh sách cho phép.</span></p>
+  <p><span class="wrong">"Dùng ORM thì không bao giờ bị SQL injection."</span><span class="fix">Chỉ khi không dùng các hàm SQL thô của nó. Hàm nào có chữ raw hay unsafe thì ghép chuỗi vào đó vẫn bị.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>SQL injection là gì, bạn phòng nó thế nào?</summary><div><p>Là khi dữ liệu người dùng gửi lên được ghép thẳng vào câu SQL, nên một chuỗi có dấu nháy có thể đổi nghĩa câu lệnh: đọc bảng khác, bỏ qua điều kiện đăng nhập, xoá dữ liệu. Tôi phòng bằng truy vấn có tham số: câu lệnh gửi đi với các chỗ trống $1, $2, giá trị gửi riêng, nên database không bao giờ đọc giá trị như SQL. Những chỗ tham số không làm được, như tên cột để sắp xếp, tôi dùng danh sách cho phép viết sẵn trong code.</p></div></details>
+  <details><summary>Vì sao truy vấn có tham số chặn được injection?</summary><div><p>Vì database phân tích câu lệnh trước khi nhận giá trị. Khi phân tích xong, nó đã biết $1 là một giá trị kiểu chuỗi ở vị trí nào. Giá trị đến sau chỉ được đặt vào chỗ đó, nên dù có dấu nháy hay chấm phẩy thì nó vẫn chỉ là dữ liệu. Ngoài ra, khi có tham số, PostgreSQL không cho một lệnh chứa nhiều câu.</p></div></details>
+  <details><summary>Làm sao cho người dùng chọn cột sắp xếp mà vẫn an toàn?</summary><div><p>Tên cột không thể là tham số, nên tôi định nghĩa sẵn một object ánh xạ từ lựa chọn của người dùng, như title hay newest, sang đoạn ORDER BY viết cứng trong code. Người dùng chỉ gửi chìa khoá, schema validate chỉ chấp nhận đúng các chìa khoá đó, và chuỗi được ghép vào SQL luôn là chuỗi do tôi viết.</p></div></details>
+</div>

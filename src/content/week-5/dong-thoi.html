@@ -1,0 +1,87 @@
+<h2>Quy tắc nghe rất đơn giản</h2>
+<p>Một hoá đơn 700.000 đồng không được nhận quá 700.000 đồng. Code ghi khoản đóng làm ba bước: đọc tổng đã đóng, so với số tiền hoá đơn, nếu còn thiếu đủ thì ghi. Cả ba bước nằm trong một transaction. Nghe có vẻ an toàn.</p>
+<p>Nhưng phụ huynh chuyển khoản 300.000 đúng lúc giáo viên cũng bấm ghi 300.000 bằng tay cho cùng hoá đơn đó, vì tưởng phụ huynh đưa tiền mặt. Hai request đến cùng lúc. Bạn sẽ tự tay tạo ra lỗi này trong hai cửa sổ psql.</p>
+
+<h2>Tự tạo lỗi bằng hai cửa sổ psql</h2>
+<p>Mở hai terminal ở repo hocphi, mỗi cái chạy <code>docker compose exec db psql -U hocphi -d hocphi</code>. Gọi chúng là A và B. Tìm một hoá đơn còn thiếu tiền:</p>
+<pre><code>SELECT i.id, i.amount, COALESCE(SUM(p.amount), 0) AS paid
+FROM invoices i
+LEFT JOIN payments p ON p.invoice_id = i.id
+GROUP BY i.id
+HAVING COALESCE(SUM(p.amount), 0) &gt; 0 AND COALESCE(SUM(p.amount), 0) &lt; i.amount
+LIMIT 1;</code></pre>
+<p>Giả sử ra hoá đơn 42: phải đóng 700.000, đã đóng 400.000, còn thiếu 300.000. Gõ từng dòng theo đúng thứ tự trong bảng, đổi 42 thành id của bạn:</p>
+<div class="tbl"><table>
+  <thead><tr><th>Bước</th><th>Cửa sổ A</th><th>Cửa sổ B</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td><code>BEGIN;</code></td><td></td></tr>
+    <tr><td>2</td><td></td><td><code>BEGIN;</code></td></tr>
+    <tr><td>3</td><td><code>SELECT SUM(amount) FROM payments WHERE invoice_id = 42;</code> → 400000</td><td></td></tr>
+    <tr><td>4</td><td></td><td>Cùng câu đó → 400000</td></tr>
+    <tr><td>5</td><td>Còn thiếu 300.000, ghi được: <code>INSERT INTO payments (invoice_id, amount) VALUES (42, 300000);</code></td><td></td></tr>
+    <tr><td>6</td><td></td><td>B cũng thấy còn thiếu 300.000: cùng câu <code>INSERT</code>. Chạy ngay, không chờ ai</td></tr>
+    <tr><td>7</td><td><code>COMMIT;</code></td><td></td></tr>
+    <tr><td>8</td><td></td><td><code>COMMIT;</code></td></tr>
+  </tbody>
+</table></div>
+<p>Giờ chạy lại câu tìm hoá đơn với <code>WHERE i.id = 42</code>: đã đóng 1.000.000 cho hoá đơn 700.000. Cả hai transaction đều đúng nếu xét riêng. Sai nằm ở chỗ chúng chạy xen kẽ nhau.</p>
+<p>Xoá khoản đóng thừa để dữ liệu dev trở lại như cũ: <code>DELETE FROM payments WHERE id = (SELECT max(id) FROM payments WHERE invoice_id = 42);</code></p>
+
+<h2>Vì sao transaction không chặn được</h2>
+<p>Mức cô lập mặc định của PostgreSQL là <code>READ COMMITTED</code>: mỗi câu lệnh thấy những gì đã được commit lúc câu đó bắt đầu chạy. Ở bước 4, A chưa commit, nên B thấy 400.000. Điều đó đúng, B không được thấy dữ liệu dở dang của A. Còn ở bước 6, hai câu <code>INSERT</code> thêm hai dòng khác nhau, không đụng nhau, nên không ai phải chờ ai.</p>
+<p>Loại lỗi này gọi là race condition: kết quả phụ thuộc vào thứ tự các request tình cờ chạy. Nó không bao giờ xuất hiện khi bạn tự thử bằng tay từng request một, và chỉ xuất hiện khi có người dùng thật.</p>
+
+<h2>Cách sửa: khoá dòng hoá đơn bằng FOR UPDATE</h2>
+<p>Làm lại bài trên, nhưng bước đầu tiên của mỗi bên là khoá dòng hoá đơn:</p>
+<div class="tbl"><table>
+  <thead><tr><th>Bước</th><th>Cửa sổ A</th><th>Cửa sổ B</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td><code>BEGIN;</code></td><td><code>BEGIN;</code></td></tr>
+    <tr><td>2</td><td><code>SELECT amount FROM invoices WHERE id = 42 FOR UPDATE;</code> → 700000</td><td></td></tr>
+    <tr><td>3</td><td></td><td>Cùng câu đó. <strong>Con trỏ đứng im</strong>: B đang chờ A</td></tr>
+    <tr><td>4</td><td><code>SELECT SUM(...)</code> → 400000, <code>INSERT</code> 300000, <code>COMMIT;</code></td><td></td></tr>
+    <tr><td>5</td><td></td><td>Câu của B chạy xong ngay khi A commit, trả 700000</td></tr>
+    <tr><td>6</td><td></td><td><code>SELECT SUM(...)</code> → 700000. Còn thiếu 0, nên B không ghi và gõ <code>ROLLBACK;</code></td></tr>
+  </tbody>
+</table></div>
+<p><code>FOR UPDATE</code> khoá dòng hoá đơn tới hết transaction. Ai khác cũng muốn <code>FOR UPDATE</code> dòng đó thì phải đứng chờ. Ở bước 6, B chạy một câu lệnh mới, nên với <code>READ COMMITTED</code> nó thấy khoản đóng A vừa commit. Hai request giờ chạy lần lượt, nhưng chỉ với cùng một hoá đơn. Ghi khoản đóng cho hoá đơn khác vẫn chạy song song bình thường.</p>
+<p>Một điều kiện để cách này đúng: <strong>mọi đoạn code ghi vào <code>payments</code> đều phải khoá hoá đơn trước</strong>. Nếu có một script nhập dữ liệu ghi thẳng vào <code>payments</code> mà không khoá, nó đi vòng qua hàng rào. Vì vậy chỉ nên có một hàm duy nhất ghi khoản đóng, và mọi chỗ khác gọi hàm đó.</p>
+
+<h2>Khi khoá phải chờ quá lâu</h2>
+<p>Mặc định, B chờ mãi cho tới khi A xong. Nếu A bị treo, B treo theo, và kết nối của B bị chiếm. Đặt giới hạn chờ ở đầu transaction:</p>
+<pre><code>SET LOCAL lock_timeout = '3s';
+-- Chờ khoá quá 3 giây thì báo lỗi 55P03, thay vì treo
+-- SET LOCAL: chỉ có hiệu lực tới hết transaction này</code></pre>
+<p>Với mã <code>55P03</code>, trả về 409 kèm thông báo "Hoá đơn đang được cập nhật, thử lại sau ít giây". Bạn đã dùng đúng lệnh này trong migration ở tuần 4.</p>
+
+<h2>Khoá nhiều dòng: coi chừng deadlock</h2>
+<p>Sau này phụ huynh có hai con sẽ đóng gộp hai hoá đơn một lần. Transaction A khoá hoá đơn 10 rồi muốn khoá 11. Cùng lúc transaction B khoá 11 rồi muốn khoá 10. Cả hai chờ nhau mãi. Đó là deadlock. PostgreSQL phát hiện được, huỷ một bên với lỗi <code>40P01</code>, bên còn lại chạy tiếp. Cách phòng là luôn khoá theo cùng một thứ tự:</p>
+<pre><code>SELECT id, amount FROM invoices WHERE id = ANY($1) ORDER BY id FOR UPDATE;</code></pre>
+
+<h2>Hai cách khác, và vì sao hocphi chọn FOR UPDATE</h2>
+<div class="tbl"><table>
+  <thead><tr><th>Cách</th><th>Làm thế nào</th><th>Đánh đổi</th></tr></thead>
+  <tbody>
+    <tr><td>Khoá dòng <code>FOR UPDATE</code></td><td>Khoá hoá đơn, đọc, kiểm tra, ghi</td><td>Dễ hiểu, dễ test. Request cùng hoá đơn phải xếp hàng, nhưng với học phí thì hiếm khi có hai người cùng ghi một hoá đơn</td></tr>
+    <tr><td>Cột tổng và một câu UPDATE</td><td>Thêm <code>invoices.paid_total</code> có <code>CHECK (paid_total &lt;= amount)</code>, rồi <code>UPDATE invoices SET paid_total = paid_total + $2 WHERE id = $1</code></td><td>Một câu lệnh, tự khoá dòng, CHECK chặn đóng quá. Nhưng giờ cùng một sự thật nằm ở hai chỗ: bảng <code>payments</code> và cột tổng. Đây đúng là thứ tuần 4 dạy bạn tránh</td></tr>
+    <tr><td><code>SERIALIZABLE</code></td><td><code>BEGIN ISOLATION LEVEL SERIALIZABLE</code>, giữ nguyên code đọc rồi ghi</td><td>Database tự phát hiện hai transaction xen kẽ và huỷ một bên với lỗi <code>40001</code>. Bạn phải viết vòng thử lại cho mọi transaction, và dễ quên</td></tr>
+  </tbody>
+</table></div>
+<p>Cả ba đều chặn được lỗi. Với 10 request cùng lúc vào hoá đơn ở trên, cả <code>FOR UPDATE</code> lẫn <code>SERIALIZABLE</code> đều cho đúng 1 khoản đóng thành công. Khác nhau ở chỗ các request còn lại nhận được gì: <code>FOR UPDATE</code> cho chúng chờ rồi trả lời "đã đủ tiền", còn <code>SERIALIZABLE</code> trả lỗi <code>40001</code> và bắt bạn thử lại.</p>
+
+<h2>Bấm hai lần là một lỗi khác</h2>
+<p>Giáo viên bấm nút "Ghi 100.000" hai lần vì mạng chậm. Hoá đơn còn thiếu 300.000, nên cả hai lần đều hợp lệ, và <code>FOR UPDATE</code> chỉ bắt lần thứ hai chờ chứ không chặn nó. Kết quả là hai khoản 100.000 cho một lần đóng tiền. Khoá dòng giải quyết chuyện hai người khác nhau ghi cùng lúc. Một người gửi lại cùng một request cần cách khác: idempotency key, trong bài lớn ngay sau đây.</p>
+
+<h2>Bút đỏ: những câu nghe đúng mà sai</h2>
+<div class="redpen">
+  <p><span class="wrong">"Đã bọc trong transaction thì không có race condition."</span><span class="fix">Ở mức READ COMMITTED mặc định, hai transaction đọc rồi ghi vẫn xen kẽ nhau được. Cần khoá dòng, hoặc SERIALIZABLE kèm thử lại.</span></p>
+  <p><span class="wrong">"Kiểm tra số dư trong JavaScript rồi ghi là được, vì Node chạy một luồng."</span><span class="fix">Node một luồng, nhưng mỗi await là một chỗ request khác chen vào. Hơn nữa có thể có nhiều bản app chạy cùng lúc. Chỗ duy nhất thấy mọi request là database.</span></p>
+  <p><span class="wrong">"Thêm FOR UPDATE ở endpoint chính là đủ."</span><span class="fix">Khoá chỉ có tác dụng khi mọi chỗ ghi đều khoá. Gom việc ghi khoản đóng vào một hàm duy nhất.</span></p>
+</div>
+
+<h2>Câu hỏi phỏng vấn</h2>
+<div class="qa">
+  <details><summary>Race condition là gì? Kể một ví dụ bạn đã xử lý.</summary><div><p>Là khi kết quả phụ thuộc vào thứ tự các thao tác tình cờ chạy cùng lúc. Trong công cụ học phí, ghi khoản đóng là đọc tổng đã đóng, so với hoá đơn, rồi ghi. Hai request đến cùng lúc đều đọc thấy còn thiếu 300 nghìn và đều ghi, nên hoá đơn bị đóng quá. Tôi sửa bằng SELECT FOR UPDATE trên dòng hoá đơn ở đầu transaction, để request thứ hai phải chờ request thứ nhất commit rồi mới đọc lại tổng. Tôi có test gửi 10 request cùng lúc và kiểm tra chỉ đúng một request thành công.</p></div></details>
+  <details><summary>Khoá bi quan và khoá lạc quan khác nhau thế nào?</summary><div><p>Khoá bi quan khoá dữ liệu trước khi đọc, như SELECT FOR UPDATE, nên người khác phải chờ. Hợp khi xung đột hay xảy ra hoặc khi xung đột rất tốn kém, như tiền. Khoá lạc quan không khoá, mà khi ghi thì kiểm tra dữ liệu chưa bị ai đổi, thường bằng cột version, nếu đã đổi thì báo lỗi để thử lại. Hợp khi xung đột hiếm và không muốn ai phải chờ, như sửa hồ sơ học sinh.</p></div></details>
+  <details><summary>Deadlock là gì, phòng thế nào?</summary><div><p>Là khi hai transaction mỗi bên giữ một khoá và chờ khoá bên kia đang giữ, nên không bên nào chạy tiếp được. PostgreSQL phát hiện và huỷ một bên. Tôi phòng bằng cách luôn khoá các dòng theo cùng một thứ tự, ví dụ ORDER BY id, giữ transaction ngắn, và đặt lock_timeout để không chờ khoá quá lâu.</p></div></details>
+</div>
