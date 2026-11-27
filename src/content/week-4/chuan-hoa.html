@@ -1,4 +1,32 @@
-<h2>Sổ thu tiền phẳng: nơi mọi rắc rối bắt đầu</h2>
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Chuẩn hoá</strong> (normalization) là tách một bảng to, lặp dữ liệu, thành nhiều bảng nhỏ sao cho <strong>mỗi sự thật chỉ được ghi ở một chỗ</strong>. <strong>ERD</strong> là sơ đồ vẽ các bảng đó và đường nối giữa chúng.</p>
+<p>Hình dung sổ thu tiền mà mỗi dòng đều chép lại số điện thoại phụ huynh. Phụ huynh đổi số là phải sửa hàng chục dòng, sót một dòng là sổ tự mâu thuẫn. Chuẩn hoá là ghi số điện thoại đúng một lần trong "sổ phụ huynh", các dòng thu tiền chỉ ghi "phụ huynh số 7".</p>
+</div>
+
+<h2>Vì sao phải chuẩn hoá</h2>
+<p>Một bảng phẳng kiểu bảng tính trông đơn giản, nhưng sinh ra ba loại lỗi: <strong>sửa sót</strong> (đổi một chỗ, quên chỗ khác), <strong>không thêm được</strong> (lớp mới chưa có học sinh thì không có dòng nào để ghi học phí lớp), và <strong>xoá mất</strong> (xoá khoản đóng cuối cùng của một học sinh là mất luôn số điện thoại phụ huynh). Chuẩn hoá chặn cả ba ngay từ thiết kế.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Bảng phẳng</dt><dd>Một bảng chứa tất cả, lặp lại thông tin ở nhiều dòng, như sổ tính tay.</dd>
+<dt>Chuẩn hoá</dt><dd>Tách dữ liệu để mỗi sự thật nằm ở một chỗ.</dd>
+<dt>Dạng chuẩn (1NF, 2NF, 3NF)</dt><dd>Các mức chuẩn hoá. Nói gọn: mỗi ô một giá trị, mỗi cột phụ thuộc vào cả khoá, và không phụ thuộc vào cột không phải khoá.</dd>
+<dt>ERD</dt><dd>Entity Relationship Diagram: sơ đồ các bảng và quan hệ giữa chúng.</dd>
+<dt>Mermaid</dt><dd>Cách vẽ sơ đồ bằng chữ, GitHub hiển thị được ngay trong file Markdown.</dd>
+<dt>Phi chuẩn hoá</dt><dd>Cố ý lặp dữ liệu để đọc nhanh hơn hoặc giữ ảnh chụp lịch sử, như giá trên hoá đơn đã xuất.</dd>
+</dl>
+
+<h2>Chuẩn hoá làm thế nào</h2>
+<ol class="steps">
+<li><strong>Tìm cột lặp</strong>: thông tin nào chép đi chép lại ở nhiều dòng (tên giáo viên, số điện thoại phụ huynh).</li>
+<li><strong>Hỏi nó thuộc về "thứ" nào</strong>: số điện thoại thuộc phụ huynh, học phí thuộc lớp.</li>
+<li><strong>Tách thứ đó thành bảng riêng</strong> có khoá chính.</li>
+<li><strong>Thay cột lặp bằng khoá ngoại</strong> trỏ sang bảng mới.</li>
+<li><strong>Vẽ ERD</strong> để kiểm tra mọi quan hệ đã đúng.</li>
+</ol>
+
+<h2>Ví dụ: sổ thu tiền phẳng, nơi mọi rắc rối bắt đầu</h2>
 <p>Nhiều giáo viên bạn phỏng vấn ở tuần 2 đang dùng một bảng tính kiểu này. Mỗi lần phụ huynh đóng tiền là thêm một dòng:</p>
 <div class="tbl"><table>
   <thead><tr><th>ngay_dong</th><th>hoc_sinh</th><th>sdt_phu_huynh</th><th>lop</th><th>giao_vien</th><th>sdt_giao_vien</th><th>hoc_phi_lop</th><th>thang</th><th>phai_dong</th><th>da_dong</th><th>ghi_chu</th></tr></thead>
@@ -32,7 +60,7 @@
 <p>Gộp lại thành một câu dễ nhớ: mỗi cột phải nói về khoá, cả khoá, và chỉ khoá. Đa số schema web dừng ở 3NF là đủ. Các dạng chuẩn cao hơn trong video có thật, nhưng hiếm khi gặp trong sản phẩm.</p>
 <p>Bảng <code>books</code> của tuần 3 có cột <code>tags text[]</code>, nhìn qua thì vi phạm 1NF. Đó là một lựa chọn có chủ ý: thẻ chỉ dùng để lọc và hiển thị, không có thông tin riêng nào cần sửa ở một chỗ. Khi thẻ cần có tên hiển thị, màu, người tạo, nó phải thành bảng riêng. Phá quy tắc thì được, miễn là bạn nói được vì sao.</p>
 
-<h2>Bài luyện: tách sổ thu tiền</h2>
+<h2>Làm thử: tách sổ thu tiền</h2>
 <p>Tự làm trên giấy trước khi đọc tiếp. Đi qua 11 cột của sổ, với mỗi cột hỏi "cột này nói về cái gì?". Gom các cột nói về cùng một thứ vào một bảng. Rồi chọn khoá cho từng bảng.</p>
 <div class="qa"><details><summary>Một lời giải</summary><div>
 <div class="tbl"><table>
@@ -105,9 +133,26 @@ erDiagram
   <p><span class="wrong">"ERD vẽ một lần lúc đầu dự án là xong."</span><span class="fix">Sơ đồ không ai cập nhật còn tệ hơn không có sơ đồ. Viết bằng Mermaid trong repo và sửa cùng commit với migration.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Cột <code>sdt_giao_vien</code> nằm trong bảng thu tiền. Nên chuyển về đâu?</summary><div><p>Về bảng <code>teachers</code>; bảng thu tiền chỉ cần đi qua lớp tới giáo viên.</p></div></details>
+<details><summary>Hoá đơn đã xuất có nên lưu lại học phí lúc xuất, dù lớp đã có cột học phí?</summary><div><p>Có. Đó là phi chuẩn hoá có chủ đích: học phí lớp đổi sau này không được làm đổi hoá đơn cũ.</p></div></details>
+<details><summary>Dấu hiệu nào cho thấy bảng chưa chuẩn hoá?</summary><div><p>Cùng một thông tin chép ở nhiều dòng, phải sửa nhiều chỗ cho một thay đổi, hoặc không thêm được dữ liệu vì thiếu dòng để ghi.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Chuẩn hoá là gì, giải quyết vấn đề gì?</summary><div><p>Chuẩn hoá là tách dữ liệu thành các bảng sao cho mỗi sự thật chỉ lưu ở một chỗ. Nó tránh ba kiểu bất thường: sửa một chỗ mà quên chỗ khác, không thêm được dữ liệu vì thiếu thứ khác đi kèm, và xoá một dòng thì mất luôn thông tin không liên quan. Trong thực tế tôi dừng ở 3NF: mỗi cột phụ thuộc vào khoá, cả khoá, và chỉ khoá.</p></div></details>
   <details><summary>Khi nào bạn phi chuẩn hoá?</summary><div><p>Khi giá trị đó thực ra là một sự thật khác, như số tiền hoá đơn tại lúc lập so với học phí hiện tại. Hoặc khi đã đo được một truy vấn đọc quá chậm và việc lưu sẵn kết quả đáng với công giữ hai nơi khớp nhau. Khi phi chuẩn hoá vì hiệu năng, tôi ghi rõ đâu là nguồn sự thật và cái gì cập nhật bản sao.</p></div></details>
   <details><summary>Đọc ERD này giúp tôi: teachers ||--o{ classes.</summary><div><p>Mỗi lớp thuộc đúng một giáo viên, và mỗi giáo viên có thể có không, một hoặc nhiều lớp. Trong database, nó thành cột <code>classes.teacher_id NOT NULL</code> có khoá ngoại tới <code>teachers</code>. Nếu một lớp có thể chưa có giáo viên thì đầu bên teachers phải là <code>o|</code> và cột được phép NULL.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Mỗi sự thật chỉ ghi ở một chỗ; chỗ khác trỏ tới bằng khoá ngoại.</li>
+<li>Bảng phẳng gây sửa sót, không thêm được, xoá mất; tách bảng theo "thứ" mà thông tin thuộc về.</li>
+<li>Vẽ ERD để kiểm tra; chỉ lặp dữ liệu khi có lý do rõ, như giữ ảnh chụp hoá đơn.</li>
+</ol>
 </div>

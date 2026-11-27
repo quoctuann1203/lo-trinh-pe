@@ -1,8 +1,35 @@
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Truy cập đồng thời</strong> là khi hai request cùng đọc và sửa một dữ liệu tại cùng một lúc. Dù mỗi request nằm trong transaction, cả hai vẫn có thể cùng đọc giá trị cũ rồi cùng ghi, làm hỏng quy tắc. Cách sửa trong bài: <strong>khoá dòng</strong> bằng <code>SELECT ... FOR UPDATE</code> để request thứ hai phải chờ.</p>
+<p>Hình dung hai người cùng xem một ghế trống trên web bán vé rồi cùng bấm mua. Không khoá thì cả hai đều "mua được" cùng một ghế. Khoá dòng là người bấm trước giữ ghế, người sau phải chờ rồi thấy ghế đã có người.</p>
+</div>
+
+<h2>Vì sao transaction thôi là chưa đủ</h2>
+<p>Lỗi này không bao giờ xuất hiện khi bạn tự thử từng request trên máy. Nó chỉ xảy ra khi hai việc trùng nhau vài mili-giây: phụ huynh chuyển khoản đúng lúc giáo viên bấm ghi tiền mặt. Kết quả là hoá đơn 700.000đ nhận 1.000.000đ. Với tiền bạc, phải chặn được trường hợp hiếm này.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Đồng thời</dt><dd>Hai hay nhiều request chạy xen kẽ nhau trên cùng dữ liệu.</dd>
+<dt>Race condition</dt><dd>Kết quả sai tuỳ vào thứ tự may rủi của các request chạy cùng lúc.</dd>
+<dt>Isolation level</dt><dd>Mức transaction thấy thay đổi của nhau. Mặc định của Postgres là <code>READ COMMITTED</code>.</dd>
+<dt><code>SELECT ... FOR UPDATE</code></dt><dd>Đọc dòng và khoá nó tới hết transaction; transaction khác muốn khoá cùng dòng phải chờ.</dd>
+<dt>Deadlock</dt><dd>Hai transaction mỗi bên giữ một khoá và chờ khoá của bên kia; Postgres phát hiện và huỷ một bên.</dd>
+<dt>Idempotency key</dt><dd>Mã duy nhất cho một lần bấm, để bấm hai lần không thành hai khoản đóng.</dd>
+</dl>
+
+<h2>Khoá dòng hoạt động thế nào</h2>
+<ol class="steps">
+<li><strong>Request A</strong> mở transaction, <code>SELECT ... FROM invoices WHERE id = $1 FOR UPDATE</code>: dòng hoá đơn bị khoá.</li>
+<li><strong>Request B</strong> chạy cùng câu đó trên cùng hoá đơn: phải đứng chờ.</li>
+<li><strong>A</strong> đọc tổng đã đóng, thấy còn đủ, ghi khoản đóng, <code>COMMIT</code>: khoá được thả.</li>
+<li><strong>B</strong> lấy được khoá, đọc lại tổng (đã có khoản của A), thấy vượt, từ chối với 409.</li>
+</ol>
+
 <h2>Quy tắc nghe rất đơn giản</h2>
 <p>Một hoá đơn 700.000 đồng không được nhận quá 700.000 đồng. Code ghi khoản đóng làm ba bước: đọc tổng đã đóng, so với số tiền hoá đơn, nếu còn thiếu đủ thì ghi. Cả ba bước nằm trong một transaction. Nghe có vẻ an toàn.</p>
 <p>Nhưng phụ huynh chuyển khoản 300.000 đúng lúc giáo viên cũng bấm ghi 300.000 bằng tay cho cùng hoá đơn đó, vì tưởng phụ huynh đưa tiền mặt. Hai request đến cùng lúc. Bạn sẽ tự tay tạo ra lỗi này trong hai cửa sổ psql.</p>
 
-<h2>Tự tạo lỗi bằng hai cửa sổ psql</h2>
+<h2>Làm thử: tự tạo lỗi bằng hai cửa sổ psql</h2>
 <p>Mở hai terminal ở repo hocphi, mỗi cái chạy <code>docker compose exec db psql -U hocphi -d hocphi</code>. Gọi chúng là A và B. Tìm một hoá đơn còn thiếu tiền:</p>
 <pre><code>SELECT i.id, i.amount, COALESCE(SUM(p.amount), 0) AS paid
 FROM invoices i
@@ -79,9 +106,26 @@ LIMIT 1;</code></pre>
   <p><span class="wrong">"Thêm FOR UPDATE ở endpoint chính là đủ."</span><span class="fix">Khoá chỉ có tác dụng khi mọi chỗ ghi đều khoá. Gom việc ghi khoản đóng vào một hàm duy nhất.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Hai request cùng ghi khoản đóng cho một hoá đơn, mỗi request trong một transaction, không khoá. Có thể nhận quá tiền không?</summary><div><p>Có. Cả hai cùng đọc tổng cũ trước khi bên kia ghi, nên cả hai đều thấy còn đủ chỗ.</p></div></details>
+<details><summary><code>FOR UPDATE</code> khoá cả bảng hay chỉ dòng?</summary><div><p>Chỉ các dòng được chọn. Request trên hoá đơn khác không phải chờ.</p></div></details>
+<details><summary>Phụ huynh bấm "Thanh toán" hai lần do mạng chậm. <code>FOR UPDATE</code> có chặn được không?</summary><div><p>Không hẳn: hai lần bấm là hai yêu cầu hợp lệ nối tiếp nhau. Cần idempotency key để lần thứ hai trả lại kết quả của lần đầu.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Race condition là gì? Kể một ví dụ bạn đã xử lý.</summary><div><p>Là khi kết quả phụ thuộc vào thứ tự các thao tác tình cờ chạy cùng lúc. Trong công cụ học phí, ghi khoản đóng là đọc tổng đã đóng, so với hoá đơn, rồi ghi. Hai request đến cùng lúc đều đọc thấy còn thiếu 300 nghìn và đều ghi, nên hoá đơn bị đóng quá. Tôi sửa bằng SELECT FOR UPDATE trên dòng hoá đơn ở đầu transaction, để request thứ hai phải chờ request thứ nhất commit rồi mới đọc lại tổng. Tôi có test gửi 10 request cùng lúc và kiểm tra chỉ đúng một request thành công.</p></div></details>
   <details><summary>Khoá bi quan và khoá lạc quan khác nhau thế nào?</summary><div><p>Khoá bi quan khoá dữ liệu trước khi đọc, như SELECT FOR UPDATE, nên người khác phải chờ. Hợp khi xung đột hay xảy ra hoặc khi xung đột rất tốn kém, như tiền. Khoá lạc quan không khoá, mà khi ghi thì kiểm tra dữ liệu chưa bị ai đổi, thường bằng cột version, nếu đã đổi thì báo lỗi để thử lại. Hợp khi xung đột hiếm và không muốn ai phải chờ, như sửa hồ sơ học sinh.</p></div></details>
   <details><summary>Deadlock là gì, phòng thế nào?</summary><div><p>Là khi hai transaction mỗi bên giữ một khoá và chờ khoá bên kia đang giữ, nên không bên nào chạy tiếp được. PostgreSQL phát hiện và huỷ một bên. Tôi phòng bằng cách luôn khoá các dòng theo cùng một thứ tự, ví dụ ORDER BY id, giữ transaction ngắn, và đặt lock_timeout để không chờ khoá quá lâu.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Transaction không chặn được hai request cùng đọc giá trị cũ rồi cùng ghi.</li>
+<li><code>SELECT ... FOR UPDATE</code> khoá dòng; request sau chờ rồi đọc lại giá trị mới.</li>
+<li>Khoá nhiều dòng thì khoá theo cùng thứ tự để tránh deadlock; bấm hai lần cần idempotency key.</li>
+</ol>
 </div>

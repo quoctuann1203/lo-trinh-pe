@@ -19,4 +19,17 @@ describe('lộ trình', () => {
     const numbers = new Set(all.map((w) => w.number));
     for (const w of weeks) expect(numbers.has(w.number)).toBe(true);
   });
+
+  test('đủ mọi checkpoint của roadmap.sh/full-stack, đúng thứ tự', () => {
+    const order = [
+      'Static Webpages', 'Interactivity', 'External Packages', 'Collaborative Work',
+      'CLI Apps', 'Simple CRUD Apps', 'Frontend Apps', 'Complete App',
+      'Deployment', 'Monitoring', 'CI / CD', 'Automation', 'Infrastructure',
+    ];
+    const seen = [...new Set(all.flatMap((w) => (w.checkpoint ? [w.checkpoint] : [])))];
+    expect([...seen].sort()).toEqual([...order].sort());
+    // Phần DevOps phải đi đúng thứ tự của roadmap.sh.
+    const devops = seen.filter((c) => order.indexOf(c) >= order.indexOf('Deployment'));
+    expect(devops).toEqual(order.slice(order.indexOf('Deployment')));
+  });
 });

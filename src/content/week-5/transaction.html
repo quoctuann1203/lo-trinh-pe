@@ -1,3 +1,31 @@
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Transaction</strong> gom nhiều câu SQL thành <em>một</em> thao tác: hoặc tất cả cùng thành công, hoặc không câu nào có hiệu lực. Không bao giờ có chuyện làm được một nửa.</p>
+<p>Hình dung chuyển khoản ngân hàng: trừ tiền tài khoản A và cộng tiền tài khoản B phải xảy ra cùng nhau. Mất điện giữa chừng mà A đã bị trừ còn B chưa được cộng là không chấp nhận được. Transaction đảm bảo hai bước đó dính liền.</p>
+</div>
+
+<h2>Vì sao cần transaction</h2>
+<p>Nhiều việc trong app là vài câu SQL liền nhau: tạo lớp rồi thêm 20 học sinh, ghi khoản đóng rồi cập nhật trạng thái hoá đơn. Lỗi xảy ra ở câu giữa thì dữ liệu nằm ở trạng thái nửa vời mà không ai cố ý tạo ra, và rất khó dọn. Transaction cho bạn một nút "huỷ hết" tự động.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt><code>BEGIN</code></dt><dd>Mở một transaction.</dd>
+<dt><code>COMMIT</code></dt><dd>Chốt: mọi thay đổi trong transaction có hiệu lực cùng lúc.</dd>
+<dt><code>ROLLBACK</code></dt><dd>Huỷ: mọi thay đổi trong transaction biến mất như chưa từng chạy.</dd>
+<dt>ACID</dt><dd>Bốn lời hứa của transaction: trọn vẹn (Atomicity), đúng quy tắc (Consistency), không thấy việc dở của nhau (Isolation), bền khi đã chốt (Durability).</dd>
+<dt>Cùng một kết nối</dt><dd>Mọi câu trong một transaction phải chạy trên đúng một kết nối, nên dùng <code>pool.connect()</code>.</dd>
+<dt>Kiểu <code>Db</code></dt><dd>Kiểu chung cho pool và client, để hàm store chạy được cả trong lẫn ngoài transaction.</dd>
+</dl>
+
+<h2>Transaction hoạt động thế nào</h2>
+<ol class="steps">
+<li><strong>Mượn một kết nối</strong> từ pool bằng <code>pool.connect()</code>.</li>
+<li><strong><code>BEGIN</code></strong>: từ đây mọi thay đổi chỉ người trong transaction thấy.</li>
+<li><strong>Chạy các câu SQL</strong> lần lượt trên chính kết nối đó.</li>
+<li><strong>Tất cả ổn thì <code>COMMIT</code></strong>; có lỗi thì <code>ROLLBACK</code>.</li>
+<li><strong>Trả kết nối</strong> bằng <code>release()</code> trong khối <code>finally</code>, dù thành công hay thất bại.</li>
+</ol>
+
 <h2>Một thao tác, nhiều câu SQL</h2>
 <p>Giáo viên mở lớp mới và thêm luôn 20 học sinh. Trong database đó là hai bước: tạo một dòng <code>classes</code>, rồi tạo 20 dòng <code>enrollments</code>. Giả sử bước hai lỗi ở học sinh thứ 13, vì id học sinh sai. Không có transaction thì lớp đã được tạo, 12 học sinh đã vào lớp, 8 học sinh thì không. Giáo viên bấm "thử lại" thì lỗi "lớp đã tồn tại". Không ai thiết kế trạng thái đó, nhưng nó nằm trong database của bạn.</p>
 <p>Transaction gói nhiều câu lệnh thành một đơn vị: hoặc tất cả có hiệu lực, hoặc không câu nào có.</p>
@@ -20,7 +48,7 @@ ROLLBACK;
 </table></div>
 <p>PostgreSQL chạy mỗi câu lệnh lẻ trong một transaction riêng, tự động. Một câu <code>UPDATE</code> sửa 1.000 dòng sẽ sửa cả 1.000 hoặc không dòng nào. Bạn chỉ cần viết <code>BEGIN</code> khi muốn nhiều câu cùng chung số phận.</p>
 
-<h2>Lỗi giữa chừng thì sao</h2>
+<h2>Làm thử: lỗi giữa chừng thì sao</h2>
 <p>Thử trong psql: <code>BEGIN</code>, một câu lỗi, rồi một câu đúng.</p>
 <pre><code>BEGIN;
 INSERT INTO teachers (name, phone) VALUES ('Cô Lan', '0900000001');   -- số đã có: lỗi 23505
@@ -112,9 +140,26 @@ await withTransaction(async (tx) =&gt; {
   <p><span class="wrong">"Gói cả việc gửi email vào transaction cho chắc."</span><span class="fix">Transaction chỉ hoàn tác được dữ liệu trong database. Email đã gửi thì không lấy lại được, và trong lúc chờ mạng thì dòng bị khoá. Gửi sau khi commit.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Viết <code>await pool.query('BEGIN')</code>, rồi <code>await pool.query('INSERT ...')</code>, rồi <code>await pool.query('COMMIT')</code>. Sai ở đâu?</summary><div><p>Mỗi <code>pool.query</code> có thể chạy trên một kết nối khác nhau, nên các câu không nằm trong cùng transaction. Dùng <code>pool.connect()</code> và chạy cả ba trên một client.</p></div></details>
+<details><summary>Trong transaction, câu thứ 3 trên 5 câu bị lỗi và bạn <code>ROLLBACK</code>. Hai câu đầu còn hiệu lực không?</summary><div><p>Không. <code>ROLLBACK</code> huỷ mọi thay đổi kể từ <code>BEGIN</code>.</p></div></details>
+<details><summary>Vì sao không nên gọi API bên ngoài (gửi email, ngân hàng) ở giữa một transaction?</summary><div><p>Transaction giữ khoá trong lúc chờ mạng, chặn người khác; và nếu rollback thì không thu hồi được email đã gửi. Giữ transaction ngắn, làm việc bên ngoài sau khi commit.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Transaction là gì? Kể một chỗ bạn đã dùng.</summary><div><p>Transaction gói nhiều câu lệnh thành một đơn vị: hoặc tất cả có hiệu lực, hoặc không câu nào có. Trong công cụ học phí, tạo lớp và thêm học sinh vào lớp là hai câu INSERT. Tôi chạy chúng trong một transaction để nếu một học sinh không hợp lệ thì lớp cũng không được tạo, và giáo viên không bị kẹt với một lớp nửa vời.</p></div></details>
   <details><summary>Bạn quản lý transaction thế nào khi dùng connection pool?</summary><div><p>Transaction gắn với một kết nối, nên tôi mượn một client từ pool, chạy BEGIN, các câu lệnh và COMMIT trên đúng client đó, ROLLBACK nếu có lỗi, và luôn trả client trong finally. Tôi gói việc này thành một hàm withTransaction nhận callback, để không ai phải tự viết lại và không ai lỡ dùng pool.query bên trong transaction.</p></div></details>
   <details><summary>Vì sao nên giữ transaction ngắn?</summary><div><p>Vì trong lúc transaction mở, các dòng nó đã sửa bị khoá và một kết nối của pool bị chiếm. Transaction dài làm request khác phải chờ và có thể làm cạn pool. Tôi không gọi mạng ra ngoài bên trong transaction. Việc như gửi email chỉ làm sau khi commit, vì database không thể hoàn tác một email đã gửi.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Transaction: nhiều câu SQL thành một thao tác, tất cả hoặc không gì cả.</li>
+<li><code>BEGIN</code>, các câu SQL, rồi <code>COMMIT</code> hoặc <code>ROLLBACK</code>, trên cùng một kết nối từ <code>pool.connect()</code>.</li>
+<li>Luôn <code>release()</code> trong <code>finally</code>; giữ transaction ngắn.</li>
+</ol>
 </div>

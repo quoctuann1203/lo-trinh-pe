@@ -1,3 +1,33 @@
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Vitest</strong> là công cụ chạy test cho dự án JavaScript và TypeScript: nó tìm các file test, chạy từng bài, rồi báo bài nào qua, bài nào hỏng và hỏng ở đâu.</p>
+<p>Nếu bài trước nói test là "máy chấm bài", thì Vitest chính là cái máy đó: bạn viết đáp án bằng <code>expect</code>, Vitest chấm mỗi lần bạn lưu file.</p>
+</div>
+
+<h2>Vì sao dùng Vitest</h2>
+<p>Bạn có thể tự viết <code>if (kq !== 1200000) console.log('sai')</code>, nhưng sẽ nhanh chóng cần: gom test thành nhóm, báo lỗi dễ đọc ("mong đợi 1.200.000, nhận 1.000.000"), chạy lại khi sửa file, giả lập thời gian, đo độ phủ. Vitest có sẵn tất cả, chạy thẳng TypeScript không cần cấu hình thêm, và dùng cú pháp giống Jest nên tài liệu, ví dụ trên mạng đều dùng được.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt><code>test</code> / <code>it</code></dt><dd>Một bài test. Hai tên giống hệt nhau.</dd>
+<dt><code>describe</code></dt><dd>Gom các test liên quan thành một nhóm.</dd>
+<dt><code>expect</code></dt><dd>Bắt đầu một khẳng định về một giá trị.</dd>
+<dt>Matcher</dt><dd>Phần sau <code>expect(x)</code> nói điều cần đúng: <code>toBe</code>, <code>toEqual</code>, <code>toThrow</code>…</dd>
+<dt>Hook (<code>beforeEach</code>…)</dt><dd>Đoạn code chạy trước hoặc sau mỗi test, để chuẩn bị và dọn dẹp.</dd>
+<dt>Mock</dt><dd>Hàm giả thay cho hàm thật, để test không gửi tin nhắn hay gọi mạng thật.</dd>
+<dt>Spy</dt><dd>Theo dõi một hàm có được gọi không, gọi mấy lần, với tham số gì.</dd>
+<dt>Coverage</dt><dd>Tỉ lệ dòng code đã được chạy qua khi test. Chỉ ra chỗ chưa có test, không nói test có tốt hay không.</dd>
+</dl>
+
+<h2>Vitest chạy một file test thế nào</h2>
+<ol class="steps">
+<li><strong>Tìm file</strong> có tên <code>*.test.ts</code> hoặc <code>*.spec.ts</code>.</li>
+<li><strong>Đọc các khối</strong> <code>describe</code> và <code>test</code> để biết có những bài nào.</li>
+<li><strong>Chạy từng test</strong>: hook <code>beforeEach</code>, thân test, hook <code>afterEach</code>.</li>
+<li><strong>Một <code>expect</code> sai</strong> thì test đó dừng và đỏ, các test khác vẫn chạy.</li>
+<li><strong>In báo cáo</strong>: số test qua, số test hỏng, và với mỗi test hỏng là mong đợi gì, nhận được gì.</li>
+</ol>
+
 <h2>Cài đặt và chạy</h2>
 <pre><code>npm install -D vitest
 # package.json → "scripts": { "test": "vitest", "test:run": "vitest run" }
@@ -40,7 +70,7 @@ describe('tinhHocPhi', () =&gt; {          // nhóm các test liên quan
 </table></div>
 <p>Phân biệt <code>toBe</code> và <code>toEqual</code> là câu hỏi phỏng vấn kinh điển: <code>expect({ a: 1 }).toEqual({ a: 1 })</code> qua, nhưng <code>expect({ a: 1 }).toBe({ a: 1 })</code> hỏng, vì đó là hai object khác nhau trong bộ nhớ.</p>
 
-<h2>Bài luyện của Thứ Ba: hàm tính học phí</h2>
+<h2>Làm thử: test hàm tính học phí (bài của Thứ Ba)</h2>
 <pre><code>// src/hoc-phi.ts
 export function tinhHocPhi(soBuoi: number, giaMoiBuoi: number, giamGiaPhanTram = 0): number {
   if (!Number.isInteger(soBuoi) || soBuoi &lt; 0) throw new RangeError('Số buổi phải là số nguyên không âm');
@@ -105,10 +135,27 @@ npx vitest run --coverage</code></pre>
   <p><span class="wrong">"Mock càng nhiều càng tốt cho test nhanh."</span><span class="fix">Không. Mock quá nhiều thì bạn chỉ test được các mock. Chỉ mock những gì đi ra ngoài hoặc không kiểm soát được.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary><code>expect({ a: 1 }).toBe({ a: 1 })</code> qua hay hỏng? Vì sao?</summary><div><p>Hỏng. <code>toBe</code> so cùng một object trong bộ nhớ; hai object khác nhau dù cùng nội dung. Dùng <code>toEqual</code>.</p></div></details>
+<details><summary>Test một hàm gửi tin nhắn cho phụ huynh mà không muốn gửi thật. Dùng gì?</summary><div><p>Một mock (<code>vi.fn()</code>) thay cho hàm gửi, rồi kiểm tra nó được gọi đúng số lần với đúng số điện thoại.</p></div></details>
+<details><summary>Coverage 100% có nghĩa là không còn bug không?</summary><div><p>Không. Coverage chỉ nói dòng nào đã chạy qua, không nói kết quả có được kiểm tra đúng hay không.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary><code>toBe</code> và <code>toEqual</code> khác nhau thế nào?</summary><div><p><code>toBe</code> so bằng <code>Object.is</code>, tức cùng một giá trị nguyên thuỷ hoặc cùng một object trong bộ nhớ. <code>toEqual</code> so nội dung từng trường một cách đệ quy. Với số và chuỗi dùng <code>toBe</code>, với object và mảng dùng <code>toEqual</code>.</p></div></details>
   <details><summary>Mock và spy khác gì? Khi nào dùng?</summary><div><p>Mock là hàm giả hoàn toàn thay cho phụ thuộc thật. Spy bọc quanh một hàm có sẵn để ghi lại lời gọi, và có thể giữ hoặc thay cách nó chạy. Dùng khi phụ thuộc đi ra ngoài (mạng, email, thanh toán), chậm, hoặc không xác định như thời gian. Tránh mock chính thứ mình đang test.</p></div></details>
   <details><summary>Làm sao test một hàm dùng <code>setTimeout</code> hoặc <code>Date.now()</code>?</summary><div><p>Dùng fake timers: <code>vi.useFakeTimers()</code> rồi <code>vi.advanceTimersByTime()</code> để tua thời gian, hoặc <code>vi.setSystemTime()</code> để cố định ngày giờ. Nhớ <code>vi.useRealTimers()</code> sau test. Như vậy test nhanh và không phụ thuộc giờ thật.</p></div></details>
   <details><summary>Test async qua dù code sai. Nguyên nhân hay gặp?</summary><div><p>Thiếu <code>await</code>: test kết thúc trước khi promise xong nên <code>expect</code> bên trong không kịp chạy, hoặc lỗi xảy ra sau khi test đã được tính là qua. Luôn <code>await</code> và dùng <code>expect(...).rejects</code> cho promise bị reject.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Vitest tìm file <code>*.test.ts</code>, chạy từng <code>test</code>, báo mong đợi gì và nhận được gì.</li>
+<li>Cấu trúc: <code>describe</code> gom nhóm, <code>test</code> là một bài, <code>expect</code> + matcher là khẳng định.</li>
+<li>Dùng mock và fake timers để test không phụ thuộc mạng hay giờ thật; coverage chỉ chỉ ra chỗ chưa test.</li>
+</ol>
 </div>

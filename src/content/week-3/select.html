@@ -1,3 +1,34 @@
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong><code>SELECT</code></strong> là câu lệnh SQL để <em>đọc</em> dữ liệu: chọn bảng, lọc dòng, chọn cột, sắp xếp và giới hạn số dòng trả về. Đây là câu bạn sẽ viết nhiều nhất.</p>
+<p>Hình dung lọc một bảng Excel: chọn sheet (<code>FROM</code>), bật bộ lọc giữ các dòng thoả điều kiện (<code>WHERE</code>), ẩn bớt cột (<code>SELECT</code>), sắp xếp (<code>ORDER BY</code>), rồi chỉ xem 10 dòng đầu (<code>LIMIT</code>).</p>
+</div>
+
+<h2>Vì sao phải viết SELECT cho đúng</h2>
+<p>Mỗi trang danh sách, mỗi con số trên dashboard đều là một câu <code>SELECT</code>. Viết sai thì trang hiện thiếu dòng (bẫy <code>NULL</code>), hiện sai thứ tự giữa các trang (thiếu <code>ORDER BY</code>), hoặc kéo cả triệu dòng về khi chỉ cần 20.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt><code>FROM</code></dt><dd>Lấy dữ liệu từ bảng nào.</dd>
+<dt><code>WHERE</code></dt><dd>Điều kiện giữ dòng, ví dụ <code>price &lt; 100000</code>.</dd>
+<dt><code>ORDER BY</code></dt><dd>Sắp xếp theo cột nào, tăng (<code>ASC</code>) hay giảm (<code>DESC</code>).</dd>
+<dt><code>LIMIT</code> / <code>OFFSET</code></dt><dd>Lấy bao nhiêu dòng, bỏ qua bao nhiêu dòng đầu. Dùng để phân trang.</dd>
+<dt><code>NULL</code></dt><dd>"Không biết" hoặc "không có". Không bằng gì cả, kể cả <code>NULL</code>; phải dùng <code>IS NULL</code>.</dd>
+<dt>Phân trang</dt><dd>Chia kết quả dài thành từng trang nhỏ.</dd>
+</dl>
+
+<h2>Database chạy một câu SELECT thế nào</h2>
+<p>Bạn viết theo thứ tự <code>SELECT ... FROM ... WHERE</code>, nhưng database làm theo thứ tự khác:</p>
+<ol class="steps">
+<li><strong><code>FROM</code></strong>: lấy bảng.</li>
+<li><strong><code>WHERE</code></strong>: bỏ các dòng không thoả điều kiện.</li>
+<li><strong><code>GROUP BY</code>, <code>HAVING</code></strong>: gom nhóm (học ở bài GROUP BY).</li>
+<li><strong><code>SELECT</code></strong>: chọn cột, tính biểu thức, đặt tên mới.</li>
+<li><strong><code>ORDER BY</code></strong>: sắp xếp.</li>
+<li><strong><code>LIMIT</code></strong>: cắt lấy số dòng cần.</li>
+</ol>
+<p>Vì <code>WHERE</code> chạy trước <code>SELECT</code>, nên trong <code>WHERE</code> không dùng được tên cột mới đặt ở <code>SELECT</code>.</p>
+
 <h2>Cấu trúc một câu SELECT</h2>
 <pre><code>SELECT title, price           -- 5. lấy những cột nào
 FROM books                    -- 1. từ bảng nào
@@ -49,7 +80,7 @@ ORDER BY price DESC, id      -- id phá thế hoà khi hai sách cùng giá
 LIMIT 10 OFFSET 20;          -- trang 3, mỗi trang 10 cuốn</code></pre>
 <p>Khi sắp tăng dần, Postgres đặt <code>NULL</code> ở cuối. Muốn khác thì viết rõ <code>ORDER BY year NULLS FIRST</code>.</p>
 
-<h2>Bài luyện: 12 câu SELECT</h2>
+<h2>Làm thử: 12 câu SELECT</h2>
 <p>Với mỗi câu, ghi dự đoán số dòng vào file trước khi chạy. Sai dự đoán là lúc học được nhiều nhất.</p>
 <ol class="list">
   <li>Tất cả sách, sắp theo tên.</li>
@@ -73,9 +104,26 @@ LIMIT 10 OFFSET 20;          -- trang 3, mỗi trang 10 cuốn</code></pre>
   <p><span class="wrong">"SELECT * cho tiện, lấy thừa cũng không sao."</span><span class="fix">Trong code thật, liệt kê đúng cột cần. Bảng thêm cột lớn là truy vấn chậm đi, và lộ cả dữ liệu không nên trả ra API.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary><code>WHERE author = NULL</code> trả về bao nhiêu dòng?</summary><div><p>Không dòng nào, vì so sánh với <code>NULL</code> luôn ra "không biết". Viết <code>WHERE author IS NULL</code>.</p></div></details>
+<details><summary>Phân trang bằng <code>LIMIT 10 OFFSET 10</code> mà không có <code>ORDER BY</code>. Có vấn đề gì?</summary><div><p>Database không hứa thứ tự cố định, nên trang 2 có thể lặp hoặc thiếu dòng so với trang 1. Luôn có <code>ORDER BY</code> theo cột duy nhất.</p></div></details>
+<details><summary><code>SELECT price * 2 AS gia_moi FROM books WHERE gia_moi &gt; 100</code> có chạy không?</summary><div><p>Không, vì <code>WHERE</code> chạy trước <code>SELECT</code> nên chưa biết <code>gia_moi</code>. Viết <code>WHERE price * 2 &gt; 100</code>.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Thứ tự xử lý logic của một câu SELECT là gì?</summary><div><p>FROM và JOIN, rồi WHERE, GROUP BY, HAVING, SELECT, DISTINCT, ORDER BY, cuối cùng là LIMIT và OFFSET. Vì vậy alias đặt trong SELECT dùng được ở ORDER BY nhưng không dùng được ở WHERE.</p></div></details>
   <details><summary>Vì sao <code>WHERE x = NULL</code> không bao giờ trả dòng nào?</summary><div><p>Vì SQL dùng logic ba giá trị: true, false và unknown. So sánh bất cứ thứ gì với NULL đều cho unknown, và WHERE chỉ giữ dòng có điều kiện là true. Muốn kiểm tra NULL phải dùng IS NULL hoặc IS DISTINCT FROM.</p></div></details>
   <details><summary>Phân trang bằng OFFSET có vấn đề gì?</summary><div><p>Database vẫn phải đọc và bỏ qua tất cả các dòng trước OFFSET, nên trang càng sâu càng chậm. Nếu có dòng mới chèn vào giữa hai lần tải trang, người dùng sẽ thấy một dòng lặp lại hoặc bị sót. Với danh sách dài, dùng phân trang theo con trỏ: <code>WHERE id &gt; id_cuoi_trang_truoc ORDER BY id LIMIT 10</code>.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li><code>SELECT</code> đọc dữ liệu: <code>FROM</code> bảng, <code>WHERE</code> lọc dòng, <code>ORDER BY</code> sắp xếp, <code>LIMIT</code> giới hạn.</li>
+<li>Database chạy <code>FROM</code> → <code>WHERE</code> → <code>SELECT</code> → <code>ORDER BY</code> → <code>LIMIT</code>.</li>
+<li><code>NULL</code> là "không biết": dùng <code>IS NULL</code>; phân trang luôn kèm <code>ORDER BY</code>.</li>
+</ol>
 </div>

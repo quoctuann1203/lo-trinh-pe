@@ -39,7 +39,7 @@ export function Sidebar({ week, available, total }: { week: NavWeek; available: 
 
       <nav className="toc" aria-label={`Mục lục tuần ${week.number}`}>
         <p className="brand">
-          <Link href="/">Lộ trình Product Engineer</Link>
+          <Link href="/">Lộ trình Full Stack Developer</Link>
           <small>{total} tuần, khoảng 10 giờ mỗi tuần</small>
         </p>
         <div className="weeks" role="group" aria-label="Chọn tuần">

@@ -1,4 +1,23 @@
-<h2>Chuẩn bị repo hocphi</h2>
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p>Bài này là bài tổng hợp của tuần 4: đưa schema công cụ thu học phí vào repo <code>hocphi</code> dưới dạng migration, rồi thay đổi nó qua bốn bước an toàn: tách bảng phụ huynh, thêm lưu trữ lớp, bỏ cột cũ, và kiểm lại bằng dữ liệu thật.</p>
+<p>Hình dung chuyển nhà mà vẫn phải ở: dọn từng phòng một, đồ phòng cũ chỉ bỏ đi khi phòng mới đã dùng được. Mỗi bước là một migration chạy được, kiểm được, hoàn tác được.</p>
+</div>
+
+<h2>Vì sao làm lại schema bằng migration</h2>
+<p>Ở tuần 3 bạn viết schema trong một file và chạy lại từ đầu mỗi lần sửa. Từ tuần 5 code sẽ đọc ghi database này, và rồi giáo viên sẽ có dữ liệu thật trong đó. Từ đây mọi thay đổi phải đi qua migration, theo cách không làm mất dữ liệu.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Repo <code>hocphi</code></dt><dd>Repo sản phẩm tạo ở tuần 2, giờ chứa thêm schema database.</dd>
+<dt><code>compose.yaml</code></dt><dd>File cấu hình Docker Compose: chạy Postgres và dbmate cho repo này.</dd>
+<dt>Migration nền</dt><dd>Migration đầu tiên tạo các bảng gốc.</dd>
+<dt>Expand</dt><dd>Bước thêm cấu trúc mới mà chưa bỏ cái cũ.</dd>
+<dt>Contract</dt><dd>Bước bỏ cấu trúc cũ sau khi mọi thứ đã chuyển sang cái mới.</dd>
+<dt>Seed</dt><dd>Script nạp dữ liệu mẫu cho schema hiện tại.</dd>
+</dl>
+
+<h2>Làm thử: chuẩn bị repo hocphi</h2>
 <p>Từ tuần này, schema học phí sống trong repo <code>hocphi</code> bạn tạo ở tuần 2, cạnh code Next.js. Tuần 5 code sẽ đọc ghi database này. Thêm <code>compose.yaml</code> ở gốc repo:</p>
 <pre><code>services:
   db:
@@ -209,9 +228,26 @@ ORDER BY tong_thieu DESC;</code></pre>
   <p><span class="wrong">"Down chạy được trên database trống thì cũng chạy được trên production."</span><span class="fix">Dữ liệu tạo ra sau migration có thể không hợp lệ với schema cũ. Trên server thật, sửa bằng migration mới.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Vì sao tách phụ huynh phải chia hai bước expand và contract, không làm một lần?</summary><div><p>Để mỗi bước chạy được và hoàn tác được riêng; dữ liệu được chép sang bảng mới và kiểm tra xong rồi mới xoá cột cũ.</p></div></details>
+<details><summary>Phải thử phần down trên dữ liệu thật, không chỉ trên database trống. Vì sao?</summary><div><p>Down có thể chạy được trên bảng trống nhưng mất dữ liệu hoặc lỗi ràng buộc khi có dữ liệu thật.</p></div></details>
+<details><summary>Đổi schema xong, seed cũ chạy lỗi. Sửa thế nào?</summary><div><p>Viết seed mới theo schema mới; seed phải luôn khớp với migration mới nhất.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Kể về một lần bạn đổi schema trên một bảng đã có dữ liệu.</summary><div><p>Trong công cụ thu học phí, số điện thoại phụ huynh ban đầu nằm trong bảng học sinh, nên anh chị em ruột bị tính thành hai phụ huynh và không gộp được tiền nợ. Tôi tách phụ huynh ra bảng riêng bằng hai migration. Migration đầu tạo bảng parents, thêm cột parent_id được phép NULL, chép dữ liệu, và giữ nguyên cột cũ. Sau đó tôi chạy ba câu kiểm tra: số phụ huynh bằng số điện thoại khác nhau, không học sinh nào bị sót, không ai bị nối nhầm. Khi cả ba đều đúng, migration thứ hai mới xoá cột cũ.</p></div></details>
   <details><summary>Dữ liệu mẫu và migration khác nhau thế nào?</summary><div><p>Migration mô tả cấu trúc và chạy ở mọi môi trường, kể cả production, đúng một lần cho mỗi file. Seed là dữ liệu giả để phát triển và kiểm thử, chỉ chạy trên máy mình hoặc môi trường test, và phải được viết lại khi schema đổi. Ngoại lệ là dữ liệu tra cứu mà ứng dụng cần để chạy, như danh sách trạng thái, có thể nằm trong migration.</p></div></details>
   <details><summary>CTE là gì, khi nào bạn dùng?</summary><div><p>CTE là mệnh đề WITH, đặt tên cho một truy vấn con để dùng như một bảng trong truy vấn chính. Tôi dùng nó khi cần tổng hợp theo hai mức khác nhau, như tính số còn thiếu của từng hoá đơn rồi mới gộp theo phụ huynh. Nếu làm trong một GROUP BY, các phép nối sẽ nhân bản dòng và làm sai tổng. CTE cũng giúp truy vấn dài dễ đọc hơn, vì mỗi bước có một cái tên.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Schema sản phẩm sống trong repo dưới dạng migration, chạy bằng Docker Compose và dbmate.</li>
+<li>Thay đổi lớn đi theo expand rồi contract, mỗi bước một migration.</li>
+<li>Thử down trên dữ liệu thật, cập nhật seed và ERD sau mỗi thay đổi.</li>
+</ol>
 </div>

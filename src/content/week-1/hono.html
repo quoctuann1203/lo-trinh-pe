@@ -1,4 +1,11 @@
-<h2>Không có framework thì sao</h2>
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Web framework</strong> là bộ khung viết sẵn phần việc lặp đi lặp lại của một server: nhận request, tìm đúng hàm để xử lý, rồi gửi response về. <strong>Hono</strong> là một web framework nhỏ, nhanh, viết bằng TypeScript, dùng để viết API trên Node.js.</p>
+<p>Hình dung một quán ăn: <strong>server</strong> là cả quán, <strong>request</strong> là phiếu gọi món, <strong>framework</strong> là quy trình của quán (ai nhận phiếu, phiếu nào chuyển cho bếp nào), còn <strong>handler</strong> là đầu bếp nấu đúng một món.</p>
+</div>
+
+<h2>Vì sao cần framework</h2>
+<p>Node.js đã có sẵn module <code>node:http</code> để mở server. Nhưng nó chỉ đưa bạn request thô. Thử viết một API chỉ có một đường dẫn <code>/health</code>:</p>
 <pre><code>import { createServer } from 'node:http';
 createServer((req, res) =&gt; {
   if (req.method === 'GET' &amp;&amp; req.url === '/health') {
@@ -8,37 +15,125 @@ createServer((req, res) =&gt; {
     res.writeHead(404).end();
   }
 }).listen(3000);</code></pre>
-<p>Bạn phải tự tách URL, tự so method, tự đọc body từng mẩu. Framework lo phần đó.</p>
-<h2>Hono dựa trên chuẩn Web</h2>
-<p>Toàn bộ app là một hàm <code>app.fetch(request) → Response</code>, dùng chính <code>Request</code>/<code>Response</code> mà bạn biết từ <code>fetch</code> ở front-end. Nhờ vậy cùng code chạy trên Node, Bun, Deno, Cloudflare Workers. Trên Node, <code>@hono/node-server</code> chuyển đổi qua lại.</p>
-<h2>Routing và context</h2>
-<pre><code>const app = new Hono();
-app.get('/books/:id', (c) =&gt; c.json({ id: c.req.param('id') }));
+<p>Một đường dẫn đã mất 8 dòng. API sách có 5 đường dẫn, mỗi cái cần đọc tham số trên URL, đọc body JSON, kiểm tra API key, trả lỗi đúng mã. Viết tay hết thì code thành một khối <code>if/else</code> rất dài, dễ sai và khó test.</p>
+<p>Framework làm sẵn ba việc đó, để bạn chỉ viết phần riêng của sản phẩm:</p>
+<ol>
+<li><strong>Routing</strong>: chọn hàm nào xử lý request nào.</li>
+<li><strong>Middleware</strong>: chạy code chung trước và sau mọi request, như kiểm tra đăng nhập, ghi log.</li>
+<li><strong>Tiện ích</strong>: đọc tham số, đọc body, trả JSON chỉ bằng một dòng.</li>
+</ol>
 
-const invoices = new Hono();
-invoices.get('/', listInvoices);
-app.route('/invoices', invoices);      <span class="c">// GET /invoices</span></code></pre>
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Request</dt><dd>Yêu cầu trình duyệt hay app gửi tới server. Gồm method (<code>GET</code>, <code>POST</code>…), đường dẫn (<code>/books/42</code>), header và có thể có body.</dd>
+<dt>Response</dt><dd>Câu trả lời server gửi về. Gồm mã trạng thái (<code>200</code>, <code>404</code>…), header và body.</dd>
+<dt>Route</dt><dd>Một cặp "method + đường dẫn" gắn với một hàm xử lý. Ví dụ <code>GET /books/:id</code>.</dd>
+<dt>Handler</dt><dd>Hàm xử lý một route: nhận request, trả response. Đầu bếp nấu đúng một món.</dd>
+<dt>Context (<code>c</code>)</dt><dd>Object Hono truyền vào mỗi handler. Chứa request (<code>c.req</code>) và các hàm tạo response (<code>c.json</code>, <code>c.text</code>).</dd>
+<dt>Middleware</dt><dd>Hàm chạy chen giữa request và handler. Dùng cho việc chung của nhiều route: kiểm tra API key, ghi log, đo thời gian.</dd>
+<dt>Runtime</dt><dd>Môi trường chạy JavaScript: Node.js, Bun, Deno, Cloudflare Workers. Hono chạy được trên tất cả.</dd>
+</dl>
+
+<h2>Hono xử lý một request thế nào</h2>
+<p>Khi có request <code>GET /books/42</code> tới, Hono đi qua bốn bước:</p>
+<figure>
+<svg viewBox="0 0 720 200" role="img" aria-label="Request đi qua middleware tới handler rồi quay ngược ra thành response">
+<rect class="svg-box" x="10" y="70" width="110" height="60" rx="6"/>
+<text class="svg-t" x="65" y="98" text-anchor="middle" font-size="15">Request</text>
+<text class="svg-s" x="65" y="117" text-anchor="middle" font-size="12">GET /books/42</text>
+<rect class="svg-accent" x="160" y="40" width="130" height="120" rx="6"/>
+<text class="svg-t" x="225" y="95" text-anchor="middle" font-size="15">Middleware A</text>
+<text class="svg-s" x="225" y="114" text-anchor="middle" font-size="12">ghi log</text>
+<rect class="svg-accent" x="320" y="40" width="130" height="120" rx="6"/>
+<text class="svg-t" x="385" y="95" text-anchor="middle" font-size="15">Middleware B</text>
+<text class="svg-s" x="385" y="114" text-anchor="middle" font-size="12">kiểm tra API key</text>
+<rect class="svg-good" x="480" y="55" width="110" height="90" rx="6"/>
+<text class="svg-t" x="535" y="98" text-anchor="middle" font-size="15">Handler</text>
+<text class="svg-s" x="535" y="117" text-anchor="middle" font-size="12">tìm sách 42</text>
+<rect class="svg-box" x="620" y="70" width="90" height="60" rx="6"/>
+<text class="svg-t" x="665" y="98" text-anchor="middle" font-size="15">Response</text>
+<text class="svg-s" x="665" y="117" text-anchor="middle" font-size="12">200 + JSON</text>
+<path class="svg-line" d="M120 85 H160 M290 75 H320 M450 75 H480"/>
+<path class="svg-line" d="M480 125 H450 M320 135 H290 M160 135 H120" stroke-dasharray="4 4"/>
+<path class="svg-line" d="M590 100 H620"/>
+<text class="svg-s" x="300" y="190" text-anchor="middle" font-size="12">Nét liền: đường vào. Nét đứt: đường ra, đi ngược lại qua từng middleware.</text>
+</svg>
+<figcaption>Request đi vào qua từng middleware tới handler, rồi response đi ra theo chiều ngược lại.</figcaption>
+</figure>
+<ol class="steps">
+<li><strong>Tìm route.</strong> Hono so method và đường dẫn với danh sách route bạn đã khai báo, thấy <code>GET /books/:id</code> khớp, và ghi nhớ <code>id = "42"</code>.</li>
+<li><strong>Chạy middleware.</strong> Các middleware khớp với đường dẫn chạy lần lượt theo thứ tự khai báo. Middleware nào cũng có thể dừng lại và trả response luôn, ví dụ trả 401 khi thiếu API key.</li>
+<li><strong>Chạy handler.</strong> Handler đọc <code>id</code>, tìm sách, gọi <code>c.json(book)</code> để tạo response.</li>
+<li><strong>Đi ngược ra.</strong> Response đi qua các middleware theo chiều ngược lại, rồi mới gửi về trình duyệt. Nhờ vậy middleware ghi log biết được request mất bao lâu và trả mã gì.</li>
+</ol>
+<p>Hono khác các framework cũ ở chỗ nó dùng chính <code>Request</code> và <code>Response</code> chuẩn của Web, là hai thứ bạn đã gặp khi gọi <code>fetch</code> ở front-end. Cả app chỉ là một hàm nhận <code>Request</code>, trả <code>Response</code>. Vì vậy cùng một đoạn code chạy được trên Node, Bun, Deno hay Cloudflare Workers.</p>
+
+<h2>Làm thử: API đầu tiên trong 5 phút</h2>
+<p><strong>Bước 1.</strong> Tạo project, chọn template <code>nodejs</code> khi được hỏi:</p>
+<pre><code>npm create hono@latest hello-hono
+cd hello-hono
+npm install</code></pre>
+<p><strong>Bước 2.</strong> Mở <code>src/index.ts</code>, thay bằng:</p>
+<pre><code>import { serve } from '@hono/node-server';
+import { Hono } from 'hono';
+
+const app = new Hono();
+
+// Route 1: GET /health
+app.get('/health', (c) =&gt; c.json({ ok: true }));
+
+// Route 2: GET /books/:id, phần :id là tham số
+app.get('/books/:id', (c) =&gt; {
+  const id = c.req.param('id');
+  return c.json({ id, title: `Sách số ${id}` });
+});
+
+serve({ fetch: app.fetch, port: 3000 });</code></pre>
+<p><strong>Bước 3.</strong> Chạy <code>npm run dev</code>, rồi mở một cửa sổ terminal khác:</p>
+<pre><code>curl localhost:3000/health
+# {"ok":true}
+
+curl localhost:3000/books/42
+# {"id":"42","title":"Sách số 42"}
+
+curl -i localhost:3000/khong-co
+# HTTP/1.1 404 Not Found</code></pre>
+<p>Bạn vừa có hai route mà không phải tự so URL hay tự gọi <code>JSON.stringify</code>. Đường dẫn không có route thì Hono tự trả 404.</p>
+
+<h2>Dùng trong API sách</h2>
+<h3>Đọc request và tạo response</h3>
+<p>Hầu hết handler chỉ cần mấy hàm này của context:</p>
 <div class="tbl"><table>
-<thead><tr><th>Đọc request</th><th>Tạo response</th><th>Truyền dữ liệu</th></tr></thead>
+<thead><tr><th>Muốn làm gì</th><th>Viết thế nào</th></tr></thead>
 <tbody>
-<tr><td><code>c.req.param('id')</code></td><td><code>c.json(data, 201)</code></td><td><code>c.set('teacherId', id)</code></td></tr>
-<tr><td><code>c.req.query()</code></td><td><code>c.text('ok')</code></td><td><code>c.get('teacherId')</code></td></tr>
-<tr><td><code>await c.req.json()</code></td><td><code>c.body(null, 204)</code></td><td></td></tr>
-<tr><td><code>c.req.header('x-api-key')</code></td><td><code>c.header('Location', url)</code></td><td></td></tr>
+<tr><td>Lấy tham số trên đường dẫn <code>/books/:id</code></td><td><code>c.req.param('id')</code></td></tr>
+<tr><td>Lấy query <code>?page=2</code></td><td><code>c.req.query('page')</code></td></tr>
+<tr><td>Đọc body JSON</td><td><code>await c.req.json()</code></td></tr>
+<tr><td>Đọc header</td><td><code>c.req.header('x-api-key')</code></td></tr>
+<tr><td>Trả JSON, kèm mã trạng thái</td><td><code>c.json(data, 201)</code></td></tr>
+<tr><td>Trả rỗng (vd. sau khi xoá)</td><td><code>c.body(null, 204)</code></td></tr>
+<tr><td>Gửi dữ liệu từ middleware sang handler</td><td><code>c.set('teacherId', id)</code> rồi <code>c.get('teacherId')</code></td></tr>
 </tbody>
 </table></div>
-<h2>Middleware chạy kiểu củ hành</h2>
-<p>Code trước <code>await next()</code> chạy trên đường đi vào, code sau chạy trên đường đi ra, theo thứ tự ngược lại.</p>
+<p>Khi có nhiều route cùng tiền tố, tách thành một app con rồi gắn vào:</p>
+<pre><code>const books = new Hono();
+books.get('/', listBooks);        // GET /books
+books.get('/:id', getBook);       // GET /books/42
+app.route('/books', books);</code></pre>
+
+<h3>Middleware: thứ tự chạy</h3>
+<p>Middleware nhận hai thứ: context <code>c</code> và hàm <code>next</code>. Code trước <code>await next()</code> chạy trên đường vào, code sau chạy trên đường ra:</p>
 <pre><code>app.use(async (c, next) =&gt; { console.log('A vào'); await next(); console.log('A ra'); });
 app.use(async (c, next) =&gt; { console.log('B vào'); await next(); console.log('B ra'); });
 app.get('/x', (c) =&gt; { console.log('handler'); return c.text('ok'); });
-<span class="c">// GET /x in: A vào, B vào, handler, B ra, A ra</span></code></pre>
-<p>Middleware dừng sớm được bằng cách trả response mà không gọi <code>next()</code>. Đây là cách làm xác thực:</p>
+// GET /x in ra: A vào, B vào, handler, B ra, A ra</code></pre>
+<p>Middleware muốn chặn request thì trả response luôn, không gọi <code>next()</code>. Đây chính là cách làm kiểm tra API key:</p>
 <pre><code>import { createMiddleware } from 'hono/factory';
 type Env = { Variables: { teacherId: string } };
 
 const requireAuth = createMiddleware&lt;Env&gt;(async (c, next) =&gt; {
   if (c.req.header('x-api-key') !== 'secret') {
+    // Dừng ở đây: handler không bao giờ chạy
     return c.json({ error: { code: 'UNAUTHENTICATED', message: 'Thiếu hoặc sai API key' } }, 401);
   }
   c.set('teacherId', 't-1');
@@ -48,34 +143,58 @@ const requireAuth = createMiddleware&lt;Env&gt;(async (c, next) =&gt; {
 const app = new Hono&lt;Env&gt;();
 app.use('/invoices/*', requireAuth);
 app.get('/invoices', (c) =&gt; c.json({ teacherId: c.get('teacherId') }));</code></pre>
-<h2>Xử lý lỗi tập trung</h2>
-<p><code>app.onError</code> bắt mọi lỗi ném ra từ handler và middleware, kể cả lỗi async. <code>app.notFound</code> lo route không tồn tại. Gom về một chỗ được bốn lợi ích: một định dạng lỗi duy nhất cho front-end, một chỗ ghi log, một chỗ chặn stack lọt ra ngoài, và handler ngắn vì gặp lỗi chỉ cần <code>throw</code>.</p>
+
+<h3>Xử lý lỗi ở một chỗ</h3>
+<p>Thay vì mỗi handler tự <code>try/catch</code> và tự chọn mã lỗi, handler chỉ cần <code>throw</code>. <code>app.onError</code> bắt mọi lỗi, kể cả lỗi trong hàm async, rồi quyết định trả gì. <code>app.notFound</code> lo đường dẫn không tồn tại.</p>
 <pre><code>app.onError((err, c) =&gt; {
   if (err instanceof AppError) {
     return c.json({ error: { code: err.code, message: err.message, details: err.details } }, err.status);
   }
-  console.error('[unexpected]', err);
-  return c.json({ error: { code: 'INTERNAL', message: 'Lỗi máy chủ' } }, 500);
+  console.error('[unexpected]', err);   // ghi log đầy đủ cho mình xem
+  return c.json({ error: { code: 'INTERNAL', message: 'Lỗi máy chủ' } }, 500);   // người dùng không thấy chi tiết
 });</code></pre>
-<h2>Tách lớp: route, service, store</h2>
+<p>Được bốn lợi ích: mọi lỗi cùng một định dạng cho front-end, một chỗ ghi log, một chỗ chặn chi tiết nội bộ lọt ra ngoài, và handler ngắn hơn.</p>
+
+<h3>Tách ba lớp: route, service, store</h3>
+<p>Khi API lớn dần, đừng nhét hết vào handler. Chia làm ba lớp, mỗi lớp chỉ lo một việc:</p>
 <div class="tbl"><table>
-<thead><tr><th>Lớp</th><th>Biết về</th><th>Không biết về</th></tr></thead>
+<thead><tr><th>Lớp</th><th>Lo việc gì</th><th>Không cần biết</th></tr></thead>
 <tbody>
 <tr><td>Route</td><td>HTTP: đọc request, validate, chọn mã trạng thái</td><td>Dữ liệu lưu ở đâu</td></tr>
-<tr><td>Service</td><td>Quy tắc nghiệp vụ: ISBN không trùng, hóa đơn đã trả không được sửa</td><td>HTTP</td></tr>
-<tr><td>Store</td><td>Đọc ghi dữ liệu (<code>Map</code> bây giờ, PostgreSQL sau này)</td><td>Quy tắc nghiệp vụ</td></tr>
+<tr><td>Service</td><td>Quy tắc nghiệp vụ: ISBN không trùng, hoá đơn đã trả không được sửa</td><td>HTTP</td></tr>
+<tr><td>Store</td><td>Đọc, ghi dữ liệu (<code>Map</code> bây giờ, PostgreSQL ở tuần 5)</td><td>Quy tắc nghiệp vụ</td></tr>
 </tbody>
 </table></div>
+<p>Lợi ích thấy ngay ở tuần 5: đổi từ <code>Map</code> sang PostgreSQL chỉ phải sửa lớp store, route và service giữ nguyên.</p>
+
 <h2>Bút đỏ: những câu nghe đúng mà sai</h2>
 <div class="redpen">
 <p><span class="wrong">"Middleware chỉ chạy trước handler."</span><span class="fix">Sai. Code sau await next() chạy sau handler và sửa được response.</span></p>
-<p><span class="wrong">"Thứ tự app.use không quan trọng."</span><span class="fix">Sai. Middleware chạy theo thứ tự khai báo. Xác thực phải đứng trước route nó bảo vệ.</span></p>
+<p><span class="wrong">"Thứ tự app.use không quan trọng."</span><span class="fix">Sai. Middleware chạy theo thứ tự khai báo. Kiểm tra đăng nhập phải đứng trước route nó bảo vệ.</span></p>
 <p><span class="wrong">"Lưu user đăng nhập vào biến toàn cục cho tiện."</span><span class="fix">Sai. Nhiều request chạy xen kẽ sẽ ghi đè nhau. Dùng c.set và c.get.</span></p>
 </div>
+
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Route <code>GET /books/:id</code> nhận request <code>GET /books/abc</code>. <code>c.req.param('id')</code> trả gì?</summary><div><p>Chuỗi <code>"abc"</code>. Tham số trên đường dẫn luôn là chuỗi; muốn số thì tự chuyển và kiểm tra (bài zod).</p></div></details>
+<details><summary>Có hai middleware A rồi B, và B trả 401 mà không gọi <code>next()</code>. Handler có chạy không? A có chạy phần "ra" không?</summary><div><p>Handler không chạy. A vẫn chạy phần sau <code>await next()</code>, vì response 401 của B đi ngược ra qua A.</p></div></details>
+<details><summary>Một handler <code>throw new AppError(...)</code>. Ai biến lỗi đó thành response?</summary><div><p><code>app.onError</code>. Handler không cần <code>try/catch</code>.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
 <details><summary>Middleware là gì? Thứ tự chạy ra sao?</summary><div><p>Hàm nằm giữa request và handler, nhận <code>context</code> và <code>next</code>. Chạy theo thứ tự khai báo trên đường vào, ngược lại trên đường ra. Có thể dừng chuỗi bằng cách trả response luôn, như middleware xác thực trả 401.</p></div></details>
 <details><summary>Vì sao gom xử lý lỗi về một chỗ?</summary><div><p>Để mọi lỗi cùng định dạng và cùng cách ghi log, để chi tiết nội bộ không lọt ra ngoài, và để handler ngắn. Handler ném lỗi có kiểu; một <code>onError</code> quyết định mã và nội dung trả về.</p></div></details>
-<details><summary>Hono khác Express thế nào?</summary><div><p>Hono dựa trên chuẩn <code>Request</code>/<code>Response</code> của Web nên chạy trên nhiều runtime và edge, viết bằng TypeScript từ đầu, và test được bằng <code>app.request()</code> không cần mở cổng. Express dùng <code>req</code>/<code>res</code> riêng của Node, hệ sinh thái lâu đời hơn, mô hình middleware tương tự.</p></div></details>
+<details><summary>Hono khác Express thế nào?</summary><div><p>Hono dựa trên chuẩn <code>Request</code>/<code>Response</code> của Web nên chạy trên nhiều runtime, viết bằng TypeScript từ đầu, và test được bằng <code>app.request()</code> không cần mở cổng. Express dùng <code>req</code>/<code>res</code> riêng của Node, hệ sinh thái lâu đời hơn, mô hình middleware tương tự.</p></div></details>
 <details><summary>Vì sao tách route, service, repository?</summary><div><p>Để mỗi lớp chỉ có một lý do thay đổi. Đổi database không đụng quy tắc nghiệp vụ, và quy tắc nghiệp vụ test được riêng, nhanh, không cần server.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Framework lo phần lặp lại của server: <strong>routing</strong>, <strong>middleware</strong>, tiện ích đọc request và tạo response.</li>
+<li>Request đi vào qua từng middleware tới handler, response đi ra theo chiều ngược lại. Middleware trả response sớm để chặn request.</li>
+<li>Handler chỉ <code>throw</code>, <code>app.onError</code> lo biến lỗi thành response. Code chia ba lớp route, service, store.</li>
+</ol>
 </div>

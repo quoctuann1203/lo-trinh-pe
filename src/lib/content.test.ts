@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { markComments, weeks } from './content';
@@ -11,11 +11,35 @@ describe.each(weeks.map((w) => [w.number, w] as const))('tuần %i', (_n, week) 
     expect(new Set(slugs).size).toBe(slugs.length);
   });
 
-  test.each(week.topics.map((t) => [t.slug, t] as const))('chủ đề %s có file nội dung và video hợp lệ', (slug, topic) => {
-    const file = path.join(process.cwd(), 'src', 'content', `week-${week.number}`, `${slug}.html`);
-    expect(existsSync(file)).toBe(true);
-    expect(topic.videos.length).toBeGreaterThan(0);
-    for (const v of topic.videos) expect(v.id).toMatch(/^[\w-]{11}$/);
+  test.each(week.topics.map((t) => [t.slug, t] as const))(
+    'chủ đề %s có file nội dung và video hợp lệ',
+    (slug, topic) => {
+      const file = path.join(process.cwd(), 'src', 'content', `week-${week.number}`, `${slug}.html`);
+      expect(existsSync(file)).toBe(true);
+      expect(topic.videos.length).toBeGreaterThan(0);
+      for (const v of topic.videos) expect(v.id).toMatch(/^[\w-]{11}$/);
+    },
+  );
+
+  // Khung bài chuẩn (xem README, mục "Khung một chủ đề"): mọi chủ đề phải đủ các phần.
+  test.each(week.topics.map((t) => [t.slug] as const))('chủ đề %s theo đúng khung bài', (slug) => {
+    const html = readFileSync(
+      path.join(process.cwd(), 'src', 'content', `week-${week.number}`, `${slug}.html`),
+      'utf8',
+    );
+    expect(html.indexOf('class="tldr"'), 'Trong một câu phải đứng đầu').toBe(5);
+    for (const part of [
+      '<h2>Vì sao',
+      '<h2>Từ khoá cần biết</h2>',
+      'class="terms"',
+      '<h2>Làm thử',
+      '<h2>Bút đỏ',
+      '<h2>Tự kiểm tra</h2>',
+      '<h2>Câu hỏi phỏng vấn</h2>',
+      'class="recap"',
+    ]) {
+      expect(html, `thiếu ${part}`).toContain(part);
+    }
   });
 
   test('mỗi buổi chỉ trỏ tới chủ đề có thật', () => {

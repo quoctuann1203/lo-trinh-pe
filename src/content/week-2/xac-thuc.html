@@ -1,3 +1,33 @@
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Xác thực</strong> trả lời câu "bạn là ai?", <strong>phân quyền</strong> trả lời câu "bạn được làm gì?". API cần cả hai: biết request đến từ giáo viên nào, rồi chỉ cho giáo viên đó xem và sửa dữ liệu của chính họ.</p>
+<p>Hình dung toà nhà văn phòng: bảo vệ ở cổng kiểm tra thẻ nhân viên (xác thực), còn cửa phòng kế toán chỉ mở cho người phòng kế toán (phân quyền). Qua được cổng chưa có nghĩa là vào được mọi phòng.</p>
+</div>
+
+<h2>Vì sao API nào cũng cần hai lớp này</h2>
+<p>API mở cho mọi người thì ai biết địa chỉ cũng đọc được hoá đơn, số điện thoại phụ huynh, và sửa được số tiền. Chỉ có xác thực mà thiếu phân quyền thì nguy hiểm hơn: giáo viên A đăng nhập đúng, rồi đổi id trên URL để xem lớp của giáo viên B. Đây là lỗi bảo mật hay gặp nhất ở API.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Xác thực (AuthN)</dt><dd>Kiểm tra bạn là ai, bằng mật khẩu, token, API key hay mã OTP.</dd>
+<dt>Phân quyền (AuthZ)</dt><dd>Kiểm tra bạn được làm gì: theo vai trò, theo quyền sở hữu dữ liệu.</dd>
+<dt>API key</dt><dd>Chuỗi bí mật gửi kèm request để chứng minh ai đang gọi. Hợp cho máy gọi máy.</dd>
+<dt>Token</dt><dd>Chuỗi server cấp sau khi đăng nhập, gửi kèm mỗi request thay cho mật khẩu.</dd>
+<dt>Header <code>Authorization</code></dt><dd>Chỗ chuẩn để đặt thông tin xác thực, ví dụ <code>Authorization: Bearer abc123</code>.</dd>
+<dt>401</dt><dd>Chưa xác thực được: thiếu hoặc sai thông tin.</dd>
+<dt>403</dt><dd>Đã biết là ai nhưng không có quyền. Có thể trả 404 để giấu việc dữ liệu tồn tại.</dd>
+<dt>Biến môi trường</dt><dd>Giá trị cấu hình đặt ngoài code (file <code>.env</code>), nơi để bí mật thay vì viết thẳng vào code.</dd>
+</dl>
+
+<h2>Một request đi qua hai lớp thế nào</h2>
+<ol class="steps">
+<li><strong>Request tới</strong> kèm thông tin xác thực trong header.</li>
+<li><strong>Middleware xác thực</strong> kiểm tra header. Thiếu hoặc sai thì trả 401 ngay, handler không chạy.</li>
+<li><strong>Đúng thì ghi lại</strong> người gọi là ai, ví dụ <code>c.set('teacherId', ...)</code>.</li>
+<li><strong>Handler phân quyền</strong>: dữ liệu được hỏi có thuộc về người này không. Không thì trả 403 hoặc 404.</li>
+<li><strong>Có quyền</strong> thì mới đọc, ghi dữ liệu và trả kết quả.</li>
+</ol>
+
 <h2>Hai câu hỏi khác nhau</h2>
 <p>Hình dung toà nhà văn phòng. Ở cổng, bảo vệ kiểm tra thẻ nhân viên: <strong>bạn là ai?</strong> Đó là <strong>xác thực</strong> (authentication, viết tắt AuthN). Lên tới tầng 5, cửa phòng kế toán chỉ mở cho người của phòng kế toán: <strong>bạn được vào đâu?</strong> Đó là <strong>phân quyền</strong> (authorization, viết tắt AuthZ).</p>
 <div class="tbl"><table>
@@ -25,7 +55,7 @@ Authorization: Bearer key-ghi-cua-ban</code></pre>
   </tbody>
 </table></div>
 
-<h2>Bài Thứ Năm: thêm API key vào API sách</h2>
+<h2>Làm thử: thêm API key vào API sách (bài Thứ Năm)</h2>
 <p>Quy tắc: <code>GET</code> là công khai. <code>POST</code>, <code>PATCH</code>, <code>DELETE</code> cần key. Có hai loại key: <code>read</code> (chỉ đọc) và <code>write</code> (được ghi). Thiếu hoặc sai key thì 401. Key <code>read</code> mà gọi lệnh ghi thì 403.</p>
 <p>Tách thành hai middleware, mỗi cái trả lời đúng một câu hỏi:</p>
 <pre><code>import { createMiddleware } from 'hono/factory';
@@ -91,10 +121,27 @@ if (!invoice) throw new AppError(404, 'NOT_FOUND', 'Không có hóa đơn');</co
   <p><span class="wrong">"Ẩn nút Xoá ở giao diện là đủ chặn người không có quyền."</span><span class="fix">Sai. Ai cũng gọi thẳng API được. Phân quyền phải nằm ở server.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Request không có header API key. Trả 401 hay 403?</summary><div><p>401: server chưa biết người gọi là ai.</p></div></details>
+<details><summary>Giáo viên A gọi <code>GET /invoices/123</code>, hoá đơn 123 thuộc lớp giáo viên B. Kiểm tra này nằm ở lớp nào?</summary><div><p>Phân quyền. Xác thực đã qua (biết là A), nhưng A không sở hữu hoá đơn này, nên trả 403 hoặc 404.</p></div></details>
+<details><summary>Vì sao không viết API key thẳng vào code?</summary><div><p>Code được đẩy lên GitHub, ai đọc repo cũng thấy khoá. Để trong biến môi trường, và thêm <code>.env</code> vào <code>.gitignore</code>.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Authentication và authorization khác nhau thế nào?</summary><div><p>Authentication xác định bạn là ai, bằng mật khẩu, token hay OTP. Authorization quyết định bạn được làm gì, dựa trên vai trò hay quyền sở hữu. Authentication luôn chạy trước. Sai ở authentication trả 401, sai ở authorization trả 403.</p></div></details>
   <details><summary>IDOR là gì và phòng thế nào?</summary><div><p>Là khi server dùng id do client gửi để lấy dữ liệu mà không kiểm tra người gọi có quyền với dữ liệu đó không. Ví dụ đổi id trên URL là xem được hóa đơn của người khác. Phòng bằng cách mọi truy vấn đều lọc theo chủ sở hữu, và có test cho trường hợp người A truy cập dữ liệu của người B.</p></div></details>
   <details><summary>Vì sao so sánh token không nên dùng <code>===</code>?</summary><div><p>Vì <code>===</code> dừng ở ký tự sai đầu tiên, nên thời gian phản hồi tiết lộ bao nhiêu ký tự đầu đã đúng. Đó là timing attack. Dùng hàm so sánh thời gian hằng như <code>crypto.timingSafeEqual</code>.</p></div></details>
   <details><summary>Session cookie và JWT khác nhau thế nào?</summary><div><p>Với session, server lưu trạng thái phiên và cookie chỉ chứa mã phiên, nên thu hồi dễ bằng cách xoá phiên. JWT tự chứa thông tin và chữ ký, server không cần lưu gì, hợp khi nhiều dịch vụ cùng kiểm tra, nhưng khó thu hồi trước khi hết hạn. Với web app một server như công cụ thu học phí, session đơn giản và an toàn hơn.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Xác thực: bạn là ai (sai trả 401). Phân quyền: bạn được làm gì (sai trả 403 hoặc 404).</li>
+<li>Phân quyền phải kiểm ở mọi request, theo quyền sở hữu dữ liệu, không chỉ ở màn hình front-end.</li>
+<li>Bí mật nằm trong biến môi trường, không nằm trong code hay trên GitHub.</li>
+</ol>
 </div>

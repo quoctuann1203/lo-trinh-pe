@@ -1,3 +1,22 @@
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Đổi schema an toàn</strong> là thay đổi bảng đang có người dùng thật (thêm cột, đổi kiểu, đổi tên) mà không làm app đứng hay lỗi trong lúc chạy migration và lúc deploy code mới.</p>
+<p>Hình dung sửa đường khi xe vẫn chạy: không chặn cả con đường một lần, mà làm làn mới bên cạnh trước, cho xe chuyển dần sang, rồi mới phá làn cũ. Đó chính là cách "expand và contract" trong bài.</p>
+</div>
+
+<h2>Vì sao đổi schema trên bảng đang dùng lại nguy hiểm</h2>
+<p>Trên máy bạn, <code>ALTER TABLE</code> chạy trong tích tắc vì bảng gần như trống và không ai khác dùng. Trên server thật, cùng lệnh đó có thể khoá bảng vài giây hay vài phút, và mọi request đọc ghi bảng đó xếp hàng chờ. Người dùng thấy app treo. Thêm nữa, code cũ và code mới chạy song song lúc deploy, nên schema phải hợp với cả hai.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Khoá (lock)</dt><dd>Cơ chế database dùng để hai thao tác không đè lên nhau. Khi giữ khoá mạnh, người khác phải chờ.</dd>
+<dt><code>ACCESS EXCLUSIVE</code></dt><dd>Khoá mạnh nhất: không ai đọc hay ghi được bảng. Hầu hết <code>ALTER TABLE</code> cần khoá này.</dd>
+<dt>Hàng đợi khoá</dt><dd>Lệnh chờ khoá chặn luôn mọi lệnh đến sau nó, kể cả lệnh chỉ đọc.</dd>
+<dt><code>lock_timeout</code></dt><dd>Thời gian tối đa chờ khoá. Quá thì lệnh thất bại thay vì chặn mọi người.</dd>
+<dt>Expand và contract</dt><dd>Đổi schema qua nhiều bước: thêm cái mới (expand), chuyển code và dữ liệu sang, rồi mới bỏ cái cũ (contract).</dd>
+<dt><code>CREATE INDEX CONCURRENTLY</code></dt><dd>Tạo index mà không chặn ghi vào bảng.</dd>
+</dl>
+
 <h2>Vấn đề không nằm ở SQL, mà ở khoá</h2>
 <p>Hầu hết lệnh <code>ALTER TABLE</code> cần khoá mạnh nhất của PostgreSQL trên bảng đó, gọi là <code>ACCESS EXCLUSIVE</code>. Trong lúc giữ khoá, không ai đọc hay ghi được bảng. Nếu lệnh chỉ đổi thông tin mô tả bảng, khoá được giữ vài mili giây và không ai nhận ra. Nếu lệnh phải đọc hay viết lại mọi dòng, khoá được giữ đúng bằng thời gian đó: vài giây với một triệu dòng, vài phút với một trăm triệu dòng.</p>
 <p>Còn một cái bẫy tệ hơn: hàng đợi khoá. Thử với ba cửa sổ psql:</p>
@@ -86,6 +105,16 @@ WHERE p.phone = s.parent_phone
   AND s.id BETWEEN 1 AND 10000;   -- lô tiếp theo: 10001 tới 20000...</code></pre>
 <p>Với dữ liệu của hocphi bây giờ thì chưa cần. Biết là có cách này để nói được khi phỏng vấn.</p>
 
+<h2>Làm thử: thấy hàng đợi khoá bằng mắt</h2>
+<p>Làm lại thí nghiệm ba cửa sổ psql ở đầu bài trên database thử, theo đúng thứ tự:</p>
+<ol class="steps">
+<li><strong>Cửa sổ 1</strong>: <code>BEGIN; SELECT * FROM students LIMIT 1;</code> và để nguyên, không <code>COMMIT</code>.</li>
+<li><strong>Cửa sổ 2</strong>: <code>ALTER TABLE students ADD COLUMN nickname text;</code> Lệnh đứng chờ.</li>
+<li><strong>Cửa sổ 3</strong>: <code>SELECT count(*) FROM students;</code> Lệnh chỉ đọc này cũng đứng chờ, xếp sau cửa sổ 2.</li>
+<li><strong>Cửa sổ 1</strong>: <code>COMMIT;</code> Cả hai cửa sổ kia chạy xong ngay.</li>
+</ol>
+<p>Rồi làm lại với <code>SET lock_timeout = '2s';</code> ở đầu cửa sổ 2: sau 2 giây lệnh <code>ALTER</code> tự thất bại, và cửa sổ 3 không còn bị chặn. Xong thì xoá cột thử: <code>ALTER TABLE students DROP COLUMN nickname;</code></p>
+
 <h2>Bút đỏ: những câu nghe đúng mà sai</h2>
 <div class="redpen">
   <p><span class="wrong">"Thêm cột có DEFAULT trên bảng lớn sẽ khoá bảng rất lâu."</span><span class="fix">Đúng với PostgreSQL trước bản 11. Từ bản 11, default là hằng số hay now() thì tức thì. Chỉ hàm cho mỗi dòng một giá trị khác nhau mới viết lại bảng.</span></p>
@@ -93,9 +122,26 @@ WHERE p.phone = s.parent_phone
   <p><span class="wrong">"Đổi tên cột là thay đổi nhỏ."</span><span class="fix">Với database thì nhỏ, với code đang chạy thì là phá vỡ. Thêm cột mới, chuyển code, rồi mới bỏ cột cũ.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Một <code>SELECT</code> đơn giản bị treo trong lúc có người chạy <code>ALTER TABLE</code>. Vì sao?</summary><div><p><code>ALTER</code> đang xếp hàng chờ khoá mạnh nhất, và mọi lệnh đến sau, kể cả đọc, phải xếp sau nó.</p></div></details>
+<details><summary>Muốn đổi tên cột <code>phone</code> thành <code>parent_phone</code> trên bảng đang dùng. Làm theo expand và contract thế nào?</summary><div><p>Thêm cột mới, ghi vào cả hai, chép dữ liệu cũ sang, chuyển code đọc sang cột mới, rồi mới bỏ cột cũ trong một migration sau.</p></div></details>
+<details><summary>Vì sao đặt <code>lock_timeout</code> trước <code>ALTER TABLE</code>?</summary><div><p>Để nếu không lấy được khoá nhanh thì lệnh tự thất bại, thay vì chặn mọi người dùng trong lúc chờ. Thử lại sau là được.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Bạn đổi tên một cột trên production thế nào mà không có downtime?</summary><div><p>Theo expand và contract. Thêm cột mới và chép dữ liệu sang. Deploy code ghi vào cả hai cột. Deploy code chỉ đọc cột mới. Khi chắc chắn không còn gì dùng cột cũ, viết migration xoá nó. Mỗi bước tương thích với cả phiên bản code trước và sau nó, nên lúc deploy không có request nào lỗi, và trước bước cuối luôn quay lại được.</p></div></details>
   <details><summary>Một migration chạy nhanh trên máy bạn lại làm production treo vài phút. Vì sao?</summary><div><p>Có hai khả năng. Lệnh đó quét hoặc viết lại cả bảng, chạy nhanh trên dữ liệu mẫu nhưng chậm trên bảng thật, trong lúc giữ khoá chặn mọi truy cập. Hoặc lệnh phải chờ một transaction dài đang chạy, và mọi truy vấn đến sau xếp hàng sau nó. Cách phòng là biết lệnh nào viết lại bảng, dùng các phiên bản không chặn như CONCURRENTLY hay NOT VALID, và đặt lock_timeout để migration tự huỷ thay vì chặn mọi người.</p></div></details>
   <details><summary>Thêm ràng buộc vào bảng lớn thế nào cho an toàn?</summary><div><p>Thêm ràng buộc với NOT VALID: việc này tức thì, và ràng buộc có hiệu lực ngay với dữ liệu mới. Sau đó chạy VALIDATE CONSTRAINT để kiểm tra dữ liệu cũ. Bước này quét bảng nhưng chỉ giữ khoá nhẹ, nên đọc ghi vẫn chạy. Index thì dùng CREATE INDEX CONCURRENTLY, chạy ngoài transaction.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li><code>ALTER TABLE</code> thường cần khoá mạnh nhất; khi chờ khoá nó chặn cả lệnh đọc.</li>
+<li>Luôn đặt <code>lock_timeout</code>; thà thất bại rồi thử lại còn hơn treo cả app.</li>
+<li>Thay đổi lớn đi theo expand và contract, để code cũ và mới cùng chạy được.</li>
+</ol>
 </div>

@@ -1,3 +1,23 @@
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Ghi dữ liệu</strong> gồm ba câu lệnh SQL: <code>INSERT</code> thêm dòng mới, <code>UPDATE</code> sửa dòng có sẵn, <code>DELETE</code> xoá dòng. Ba câu này đổi dữ liệu thật, nên sai một chữ có thể sửa hay xoá nhầm cả bảng.</p>
+<p>Hình dung sổ điểm danh: <code>INSERT</code> là viết thêm một học sinh mới, <code>UPDATE</code> là sửa số buổi của một bạn, <code>DELETE</code> là gạch tên một bạn đã nghỉ. <code>WHERE</code> là ngón tay chỉ đúng dòng cần sửa; quên nó là sửa cả trang.</p>
+</div>
+
+<h2>Vì sao phải cẩn thận khi ghi</h2>
+<p><code>SELECT</code> sai thì chỉ hiện sai, chạy lại là xong. <code>UPDATE</code> hay <code>DELETE</code> sai thì dữ liệu đã đổi, và không có nút "hoàn tác". Hai thói quen trong bài này giúp bạn an toàn: chạy <code>SELECT</code> với đúng <code>WHERE</code> trước khi <code>UPDATE</code>/<code>DELETE</code>, và không bao giờ ghép chuỗi để tạo câu SQL.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt><code>INSERT</code></dt><dd>Thêm dòng mới vào bảng.</dd>
+<dt><code>UPDATE</code></dt><dd>Sửa giá trị trong các dòng thoả <code>WHERE</code>.</dd>
+<dt><code>DELETE</code></dt><dd>Xoá các dòng thoả <code>WHERE</code>.</dd>
+<dt><code>RETURNING</code></dt><dd>Trả về dòng vừa thêm, sửa hay xoá, khỏi phải <code>SELECT</code> lại.</dd>
+<dt><code>DEFAULT</code></dt><dd>Giá trị tự điền khi bạn không nhắc tới cột đó.</dd>
+<dt>UPSERT</dt><dd>Thêm nếu chưa có, cập nhật nếu đã có: <code>INSERT ... ON CONFLICT ... DO UPDATE</code>.</dd>
+<dt>SQL injection</dt><dd>Lỗ hổng khi ghép dữ liệu người dùng vào chuỗi SQL, để họ chèn được câu lệnh của riêng họ.</dd>
+</dl>
+
 <h2>INSERT: thêm dòng</h2>
 <pre><code>INSERT INTO books (title, author, year, price)
 VALUES ('Chí Phèo', 'Nam Cao', 1941, 45000)
@@ -51,6 +71,18 @@ await db.query(`INSERT INTO books (title) VALUES ('${title}')`);
 await db.query('INSERT INTO books (title) VALUES ($1)', [title]);</code></pre>
 <p>Lỗi ở dòng đầu gọi là SQL injection. Nó vẫn nằm trong nhóm lỗi bảo mật phổ biến nhất, dù cách phòng rất đơn giản: luôn dùng tham số.</p>
 
+<h2>Làm thử: sửa an toàn theo ba bước</h2>
+<p>Trong <code>psql</code>, với bảng <code>books</code>:</p>
+<pre><code>-- 1. Xem trước đúng những dòng sẽ bị sửa
+SELECT id, title, price FROM books WHERE author = 'Nam Cao';
+
+-- 2. Sửa với ĐÚNG điều kiện đó, và xem lại kết quả
+UPDATE books SET price = price + 5000 WHERE author = 'Nam Cao'
+RETURNING id, title, price;
+
+-- 3. So số dòng psql báo (UPDATE 2) với số dòng ở bước 1</code></pre>
+<p>Nếu hai con số khác nhau, điều kiện của bạn đã sai. Tập thói quen này ngay từ bây giờ, trước khi làm với dữ liệu thật.</p>
+
 <h2>Bút đỏ: những câu nghe đúng mà sai</h2>
 <div class="redpen">
   <p><span class="wrong">"UPDATE chạy không báo lỗi nghĩa là đã sửa được dòng đó."</span><span class="fix">Chưa chắc. Không khớp dòng nào vẫn là thành công, với UPDATE 0. Phải kiểm tra số dòng bị ảnh hưởng.</span></p>
@@ -58,9 +90,26 @@ await db.query('INSERT INTO books (title) VALUES ($1)', [title]);</code></pre>
   <p><span class="wrong">"Đã escape dấu nháy rồi thì ghép chuỗi vào SQL vẫn an toàn."</span><span class="fix">Tự escape rất dễ sót. Câu truy vấn có tham số là cách duy nhất nên dùng.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary><code>DELETE FROM books;</code> không có <code>WHERE</code> sẽ làm gì?</summary><div><p>Xoá toàn bộ dòng trong bảng.</p></div></details>
+<details><summary>Vì sao luôn liệt kê tên cột trong <code>INSERT</code>?</summary><div><p>Để câu lệnh không phụ thuộc thứ tự cột; khi có người thêm cột mới, câu viết không tên cột sẽ hỏng âm thầm.</p></div></details>
+<details><summary>Code <code>`INSERT INTO books (title) VALUES ('${title}')`</code> có vấn đề gì?</summary><div><p>SQL injection: người dùng gửi tiêu đề có dấu nháy là chèn được câu lệnh. Dùng tham số <code>$1</code>.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Bạn sẽ làm gì trước khi chạy một câu UPDATE trên database thật?</summary><div><p>Chạy câu SELECT với đúng mệnh đề WHERE đó để xem số dòng và nội dung sẽ bị sửa. Chạy UPDATE trong transaction, kiểm tra số dòng bị ảnh hưởng có khớp dự đoán không, rồi mới COMMIT. Nếu sửa nhiều dòng thì chắc chắn có bản sao lưu gần nhất, và tốt nhất là có người thứ hai xem lại câu lệnh.</p></div></details>
   <details><summary>SQL injection là gì và phòng thế nào?</summary><div><p>Là khi dữ liệu người dùng được ghép thẳng vào chuỗi SQL, nên người dùng có thể chèn thêm lệnh SQL của họ, ví dụ đọc bảng khác hay xoá dữ liệu. Phòng bằng câu truy vấn có tham số: câu SQL và giá trị được gửi riêng, database không bao giờ hiểu giá trị là code. ORM và query builder cũng làm như vậy bên dưới.</p></div></details>
   <details><summary>Xoá mềm và xoá cứng khác nhau thế nào, khi nào dùng cái nào?</summary><div><p>Xoá cứng là DELETE thật, dòng biến mất. Xoá mềm là đánh dấu bằng cột như deleted_at và lọc đi khi đọc. Xoá mềm hợp với dữ liệu cần lịch sử hoặc cần khôi phục như hoá đơn, đơn hàng. Đổi lại, mọi truy vấn phải nhớ lọc, và ràng buộc UNIQUE phải tính tới các dòng đã xoá. Với dữ liệu cá nhân mà người dùng yêu cầu xoá, thường phải xoá cứng.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li><code>INSERT</code> thêm, <code>UPDATE</code> sửa, <code>DELETE</code> xoá; <code>RETURNING</code> trả về dòng đã đổi.</li>
+<li>Trước khi <code>UPDATE</code>/<code>DELETE</code>, chạy <code>SELECT</code> với đúng <code>WHERE</code> đó.</li>
+<li>Không bao giờ ghép chuỗi để tạo SQL; dùng tham số <code>$1</code>.</li>
+</ol>
 </div>

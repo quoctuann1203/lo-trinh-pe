@@ -1,7 +1,24 @@
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Khởi tạo repo</strong> là dựng bộ khung ban đầu cho dự án sản phẩm: tạo project Next.js, cài công cụ test, sắp thư mục, viết test đầu tiên, rồi đẩy lên GitHub. Từ đây mỗi thay đổi đều được lưu lịch sử và kiểm tra.</p>
+<p>Hình dung xây nhà: trước khi chọn màu sơn, phải đổ móng, kéo điện nước. Repo là phần móng đó; làm đúng từ đầu thì về sau xây thêm tầng nào cũng không phải đập ra làm lại.</p>
+</div>
+
 <h2>Vì sao làm việc này ngay cả khi đổi ý tưởng</h2>
 <p>Dù quyết định Thứ Bảy là làm tiếp hay đổi hướng, bạn vẫn cần một repo sản phẩm có nền móng đúng: chạy được, test được, build được. Nếu đổi ý tưởng, chỉ cần đổi tên repo. Phần nền móng bên dưới giống hệt.</p>
 
-<h2>Bước 1: tạo project</h2>
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Repo (repository)</dt><dd>Thư mục dự án được Git theo dõi lịch sử thay đổi.</dd>
+<dt>Git</dt><dd>Công cụ lưu lịch sử code: mỗi lần lưu là một commit.</dd>
+<dt>GitHub</dt><dd>Trang web lưu repo Git trên mạng, để sao lưu và làm việc nhóm.</dd>
+<dt>Next.js</dt><dd>Framework React làm được cả giao diện lẫn phần server trong cùng một dự án.</dd>
+<dt><code>create-next-app</code></dt><dd>Lệnh tạo sẵn project Next.js với cấu hình chuẩn.</dd>
+<dt>CI</dt><dd>Continuous Integration: máy chủ tự chạy test mỗi lần bạn đẩy code lên.</dd>
+<dt><code>.gitignore</code></dt><dd>File liệt kê thứ không đưa lên Git, như <code>node_modules</code> và <code>.env</code>.</dd>
+</dl>
+
+<h2>Làm thử, bước 1: tạo project</h2>
 <pre><code>npx create-next-app@latest hocphi --ts --app --no-tailwind --eslint --src-dir --import-alias "@/*" --use-npm --yes
 cd hocphi
 npm run dev        # mở http://localhost:3000</code></pre>
@@ -93,9 +110,26 @@ jobs:
   <p><span class="wrong">"Commit .env rồi xoá đi ở commit sau là an toàn."</span><span class="fix">Sai. Nó vẫn nằm trong lịch sử Git. Phải đổi ngay khoá bị lộ.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Vì sao không đưa file <code>.env</code> lên GitHub?</summary><div><p>Nó chứa bí mật như mật khẩu database và API key. Ai xem được repo là có bí mật.</p></div></details>
+<details><summary>Test đầu tiên của repo chỉ kiểm tra một hàm rất đơn giản. Nó có ích gì?</summary><div><p>Nó chứng minh bộ công cụ test đã chạy đúng. Từ đây thêm test mới chỉ là viết thêm file.</p></div></details>
+<details><summary>CI chạy test mỗi lần push giúp gì khi bạn làm một mình?</summary><div><p>Bắt lỗi khi bạn quên chạy test trên máy, và cho thấy code chạy được trên một máy sạch, không chỉ máy của bạn.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Bạn tổ chức thư mục một project Next.js thế nào?</summary><div><p>Route trong <code>app/</code> giữ mỏng, chỉ nối dữ liệu với giao diện. Component giao diện trong <code>components/</code>. Logic nghiệp vụ là hàm thuần trong <code>lib/domain</code>, không phụ thuộc framework, có test đặt cạnh. Schema zod dùng chung cho form và API. Như vậy phần quan trọng nhất dễ test nhất và không bị khoá vào framework.</p></div></details>
   <details><summary>Server Component và Client Component khác nhau thế nào?</summary><div><p>Server Component chạy trên server, đọc dữ liệu trực tiếp được và không gửi JavaScript của nó xuống trình duyệt. Client Component, đánh dấu bằng <code>'use client'</code>, chạy cả trong trình duyệt, dùng được state, effect và sự kiện. Mặc định trong App Router là Server Component. Chỉ phần nào cần tương tác mới là Client Component.</p></div></details>
   <details><summary>CI là gì, bạn cho nó chạy những gì?</summary><div><p>Continuous Integration: mỗi lần push hoặc mở pull request, một máy chủ tự chạy các bước kiểm tra. Mình cho chạy lint, kiểm tra kiểu, test và build. Nếu bước nào đỏ thì không merge. Nó bắt lỗi trước khi lỗi vào nhánh chính.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Repo sản phẩm cần chạy được, test được, build được ngay từ ngày đầu.</li>
+<li>Thứ tự: tạo project, cài Vitest, sắp thư mục, test đầu tiên, đẩy lên GitHub.</li>
+<li>Bí mật không lên Git; CI chạy test giúp bạn mỗi lần push.</li>
+</ol>
 </div>

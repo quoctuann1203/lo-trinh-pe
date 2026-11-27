@@ -1,5 +1,10 @@
-<h2>Test là gì, nói đơn giản</h2>
-<p>Hãy tưởng tượng bạn là giáo viên chấm bài. Bạn có <strong>đáp án</strong>, và bạn so bài làm với đáp án. Một bài test làm đúng việc đó: nó gọi code của bạn với một <strong>đầu vào</strong> cố định, rồi so <strong>kết quả</strong> với điều bạn mong đợi. Khớp thì qua, không khớp thì báo đỏ.</p>
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Test</strong> (kiểm thử tự động) là đoạn code gọi code của bạn với một đầu vào cố định rồi so kết quả với điều bạn mong đợi. Khớp thì qua, không khớp thì báo đỏ, và máy làm việc đó trong vài giây mỗi lần bạn sửa code.</p>
+<p>Hình dung giáo viên chấm bài có sẵn <strong>đáp án</strong>. Thay vì tự đọc từng bài, cô đưa máy chấm: đặt bài vào, máy so với đáp án và báo câu nào sai.</p>
+</div>
+
+<h2>Một bài test trông thế nào</h2>
 <pre><code>import { test, expect } from 'vitest';
 import { tinhHocPhi } from './hoc-phi';
 
@@ -14,6 +19,26 @@ test('8 buổi, 150.000đ mỗi buổi thì học phí là 1.200.000đ', () =&gt
   <li><strong>Bắt lỗi sớm và rẻ.</strong> Lỗi tính sai học phí bị test bắt trên máy bạn tốn 1 phút. Cùng lỗi đó bị phụ huynh phát hiện thì tốn cả uy tín.</li>
   <li><strong>Test là tài liệu sống.</strong> Đọc test của <code>POST /books</code> là biết API chấp nhận gì, từ chối gì, trả mã nào. Và tài liệu này không bao giờ cũ, vì nó cũ là nó hỏng.</li>
 </ul>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Test case</dt><dd>Một bài test: một tình huống, một kết quả mong đợi.</dd>
+<dt>Assertion (<code>expect</code>)</dt><dd>Câu khẳng định trong test, ví dụ <code>expect(x).toBe(5)</code>. Sai là test đỏ.</dd>
+<dt>Unit test</dt><dd>Test một hàm hoặc một module, tách khỏi phần còn lại.</dd>
+<dt>Integration test</dt><dd>Test nhiều phần chạy cùng nhau, ví dụ gửi request vào app rồi kiểm tra response.</dd>
+<dt>E2E test</dt><dd>Test cả hệ thống như người dùng thật: mở trình duyệt, bấm nút.</dd>
+<dt>Ranh giới (edge case)</dt><dd>Giá trị ở mép quy tắc: 0, 1, chuỗi rỗng, đúng giới hạn và vượt giới hạn một chút.</dd>
+<dt>Regression</dt><dd>Lỗi đã sửa rồi lại quay lại. Mỗi bug sửa xong nên có một test chặn nó.</dd>
+<dt>TDD</dt><dd>Viết test trước, thấy nó đỏ, rồi mới viết code cho nó xanh.</dd>
+</dl>
+
+<h2>Một lần chạy test diễn ra thế nào</h2>
+<ol class="steps">
+<li><strong>Bạn gõ</strong> <code>npm test</code>. Trình chạy test (Vitest) tìm mọi file tên <code>*.test.ts</code>.</li>
+<li><strong>Mỗi test chạy riêng</strong>: chuẩn bị dữ liệu, gọi code, kiểm tra kết quả bằng <code>expect</code>.</li>
+<li><strong>Báo kết quả</strong>: test nào qua thì xanh, test nào hỏng thì đỏ kèm "mong đợi gì, nhận được gì".</li>
+<li><strong>Chế độ theo dõi</strong>: bạn lưu file là test liên quan tự chạy lại.</li>
+</ol>
 
 <h2>Ba loại test</h2>
 <div class="tbl"><table>
@@ -61,11 +86,32 @@ test('8 buổi, 150.000đ mỗi buổi thì học phí là 1.200.000đ', () =&gt
 <h2>TDD: viết test trước</h2>
 <p>Test-Driven Development là vòng lặp ba bước: <strong>Đỏ</strong> (viết một test cho hành vi chưa có, chạy thấy hỏng), <strong>Xanh</strong> (viết code tối thiểu để test qua), <strong>Dọn</strong> (sửa code cho đẹp, test vẫn xanh). Bạn không cần làm TDD cho mọi thứ. Nhưng hôm Thứ Năm, khi thêm API key, hãy thử: viết test 401 và 403 trước, thấy chúng đỏ, rồi mới viết middleware. Cảm giác thấy test chuyển từ đỏ sang xanh cho bạn biết chắc test đó thật sự kiểm tra được thứ gì.</p>
 
+<h2>Làm thử: liệt kê test trước khi viết code</h2>
+<p>Hàm <code>tinhHocPhi(soBuoi, giaMoiBuoi, giamGiaPhanTram)</code> tính học phí một tháng. Chưa cần viết code, chỉ viết ra giấy danh sách tên test theo bốn nhóm ở mục "Nên test cái gì". Rồi so với gợi ý:</p>
+<div class="tbl"><table>
+<thead><tr><th>Nhóm</th><th>Tên test gợi ý</th></tr></thead>
+<tbody>
+<tr><td>Hành vi chính</td><td>8 buổi, 150.000đ, không giảm thì 1.200.000đ</td></tr>
+<tr><td>Ranh giới</td><td>0 buổi thì 0đ; giảm 100% thì 0đ; giảm 10% của 1.200.000đ thì 1.080.000đ</td></tr>
+<tr><td>Đường lỗi</td><td>Số buổi âm thì ném lỗi; giảm giá trên 100% thì ném lỗi</td></tr>
+<tr><td>Lỗi đã từng xảy ra</td><td>Số tiền lẻ được làm tròn về đồng, không còn số thập phân</td></tr>
+</tbody>
+</table></div>
+<p>Bài Vitest ngay sau sẽ biến danh sách này thành test chạy được.</p>
+
 <h2>Bút đỏ: những câu nghe đúng mà sai</h2>
 <div class="redpen">
   <p><span class="wrong">"Coverage 100% nghĩa là không còn bug."</span><span class="fix">Sai. Coverage chỉ nói dòng code đã được chạy, không nói kết quả đã được kiểm tra đúng. Một test không có expect vẫn làm coverage tăng.</span></p>
   <p><span class="wrong">"Test làm chậm tiến độ."</span><span class="fix">Chỉ chậm ở ngày đầu. Từ lần sửa code thứ hai trở đi, test tiết kiệm thời gian kiểm tra tay.</span></p>
   <p><span class="wrong">"Càng nhiều E2E test càng chắc."</span><span class="fix">Không. E2E chậm và hay hỏng vặt. Dùng ít, cho những luồng quan trọng nhất như thu tiền.</span></p>
+</div>
+
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Kiểm tra <code>POST /books</code> trả 201 bằng <code>app.request()</code> là loại test gì?</summary><div><p>Integration test: route, validate, xử lý lỗi và kho dữ liệu chạy cùng nhau, nhưng không cần trình duyệt.</p></div></details>
+<details><summary>Vì sao kim tự tháp test có nhiều unit test và rất ít E2E?</summary><div><p>Unit test nhanh, rẻ, ít hỏng vặt. E2E chậm, dễ hỏng vì lý do ngoài code, nên chỉ để cho vài luồng quan trọng nhất.</p></div></details>
+<details><summary>Có cần viết test kiểm tra zod bắt được chuỗi rỗng không?</summary><div><p>Không cần test bản thân zod. Nên test hành vi của API: gửi chuỗi rỗng thì API trả 422 đúng định dạng lỗi.</p></div></details>
 </div>
 
 <h2>Câu hỏi phỏng vấn</h2>
@@ -74,4 +120,13 @@ test('8 buổi, 150.000đ mỗi buổi thì học phí là 1.200.000đ', () =&gt
   <details><summary>Bạn quyết định test cái gì thế nào?</summary><div><p>Theo rủi ro: hành vi chính, các ranh giới, mọi đường lỗi mà API hứa trả, và mọi bug đã từng xảy ra. Không test code thư viện hay chi tiết bên trong. Mình test hành vi mà client nhìn thấy, để đổi cách cài đặt không làm hỏng test.</p></div></details>
   <details><summary>Coverage bao nhiêu là đủ?</summary><div><p>Không có con số thần kỳ. Coverage cao mà test không kiểm tra kết quả thì vô nghĩa. Mình dùng coverage để tìm chỗ chưa test, rồi tự hỏi chỗ đó hỏng thì có sao không. Với logic tiền bạc như tính học phí, mình muốn gần 100% kèm test ranh giới.</p></div></details>
   <details><summary>Flaky test là gì? Xử lý thế nào?</summary><div><p>Là test lúc qua lúc hỏng dù code không đổi, thường do phụ thuộc thời gian thật, thứ tự chạy, dữ liệu chung giữa các test, hoặc mạng. Xử lý bằng cách reset dữ liệu trước mỗi test, giả lập thời gian, và mock các lời gọi ra ngoài. Không bao giờ chấp nhận "chạy lại là qua".</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Test là code so kết quả thật với kết quả mong đợi; nhờ nó bạn dám sửa code.</li>
+<li>Ưu tiên test hành vi chính, ranh giới, đường lỗi và các bug đã từng gặp.</li>
+<li>Mỗi test có ba phần: chuẩn bị, làm, kiểm tra; tên test là một câu mô tả hành vi.</li>
+</ol>
 </div>

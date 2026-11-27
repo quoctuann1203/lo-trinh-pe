@@ -11,8 +11,8 @@ import '@fontsource/jetbrains-mono/600.css';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: { default: 'Lộ trình Product Engineer', template: '%s | Lộ trình Product Engineer' },
-  description: 'Lộ trình 52 tuần từ front-end developer lên product engineer.',
+  title: { default: 'Lộ trình Full Stack Developer', template: '%s | Lộ trình Full Stack Developer' },
+  description: 'Lộ trình 52 tuần trở thành full-stack developer, theo roadmap.sh/full-stack.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

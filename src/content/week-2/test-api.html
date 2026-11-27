@@ -1,3 +1,30 @@
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Test API</strong> là viết test gửi request thật vào app của bạn (không cần mở server) rồi kiểm tra mã trạng thái và body trả về, đúng như bạn vẫn làm bằng <code>curl</code>, nhưng máy làm và chạy lại được mỗi lần sửa code.</p>
+<p>Hình dung một "khách hàng bí mật" được thuê đi thử quán: gọi đủ mọi món, cố tình gọi món không có, trả tiền sai, rồi ghi lại quán phản ứng ra sao. Bộ test API là khách hàng bí mật đó, đến thử quán mỗi lần bạn thay đổi thực đơn.</p>
+</div>
+
+<h2>Vì sao test qua API thay vì test từng hàm</h2>
+<p>Người dùng API của bạn (front-end, app di động) chỉ thấy request và response. Test ở mức đó kiểm tra đúng thứ họ thấy: route, validate, xử lý lỗi và kho dữ liệu cùng lúc. Với Hono, <code>app.request()</code> gọi thẳng vào app trong bộ nhớ, nên test vẫn chạy rất nhanh mà không phải mở cổng hay chờ mạng.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt><code>app.request()</code></dt><dd>Hàm của Hono gửi một request vào app ngay trong test, trả về <code>Response</code> như <code>fetch</code>.</dd>
+<dt>Hàm trợ giúp (helper)</dt><dd>Hàm nhỏ bạn tự viết để khỏi lặp lại phần giống nhau, ví dụ gửi JSON kèm API key.</dd>
+<dt>Fixture</dt><dd>Dữ liệu mẫu dùng lại trong nhiều test, ví dụ một cuốn sách hợp lệ.</dd>
+<dt><code>beforeEach</code></dt><dd>Chạy trước mỗi test, thường để xoá dữ liệu cho mỗi test bắt đầu sạch.</dd>
+<dt>Độ phủ (coverage)</dt><dd>Phần trăm dòng code đã chạy qua khi test. Dùng để tìm nhánh chưa ai thử.</dd>
+<dt>Mutation testing (tay)</dt><dd>Cố tình làm hỏng code để xem bộ test có bắt được không.</dd>
+</dl>
+
+<h2>Một test API chạy thế nào</h2>
+<ol class="steps">
+<li><strong>Dọn dữ liệu</strong> trong <code>beforeEach</code> để test không phụ thuộc nhau.</li>
+<li><strong>Gửi request</strong> bằng <code>app.request('/books', { method: 'POST', ... })</code>.</li>
+<li><strong>Kiểm tra mã trạng thái</strong>: <code>expect(res.status).toBe(201)</code>.</li>
+<li><strong>Kiểm tra body</strong> bằng <code>await res.json()</code>, và nếu cần, gọi thêm một request để xác nhận dữ liệu đã thật sự đổi.</li>
+</ol>
+
 <h2>Từ curl sang test</h2>
 <p>Ở tuần 1 bạn kiểm tra API bằng 15 lệnh curl, đọc mã trạng thái bằng mắt. Test tự động làm đúng việc đó, nhưng máy đọc thay bạn, chạy hết trong chưa tới một giây, và chạy lại được mỗi lần bạn sửa code.</p>
 <div class="tbl"><table>
@@ -15,7 +42,7 @@
 <p>Đặt cạnh code: <code>src/books.test.ts</code>. Template Hono dùng <code>"module": "NodeNext"</code>, nên import trong test vẫn ghi đuôi <code>.js</code> như code thường, Vitest tự hiểu. Thêm vào <code>tsconfig.json</code> để <code>npm run build</code> không biên dịch file test vào <code>dist/</code>:</p>
 <pre><code>"exclude": ["node_modules", "src/**/*.test.ts"]</code></pre>
 
-<h2>Bước 1: một hàm trợ giúp gửi request</h2>
+<h2>Làm thử, bước 1: một hàm trợ giúp gửi request</h2>
 <pre><code>// src/test-helpers.ts
 import { app } from './app.js';
 
@@ -140,9 +167,26 @@ test('lỗi bất ngờ → 500, không lộ stack, có ghi log', async () =&gt;
   <p><span class="wrong">"Test qua hết rồi, không cần thử làm hỏng code."</span><span class="fix">Nên thử. Test chưa từng đỏ có thể là test không kiểm tra gì cả.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Vì sao mỗi test nên tự tạo dữ liệu nó cần, thay vì dựa vào test chạy trước?</summary><div><p>Để test chạy được riêng lẻ, theo thứ tự bất kỳ. Test phụ thuộc nhau thì một cái hỏng kéo theo cả loạt, rất khó tìm nguyên nhân.</p></div></details>
+<details><summary>Test <code>DELETE /books/:id</code> trả 204. Như vậy đã đủ chưa?</summary><div><p>Chưa. Nên gọi tiếp <code>GET /books/:id</code> và mong đợi 404, để chắc sách thật sự đã bị xoá.</p></div></details>
+<details><summary>Bạn xoá dòng kiểm tra ISBN trùng trong code mà bộ test vẫn xanh. Điều đó nói gì?</summary><div><p>Bộ test chưa có test nào cho trường hợp ISBN trùng. Phải thêm test mong đợi 409.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Bạn test một REST API như thế nào?</summary><div><p>Mình viết integration test gửi request vào app, với Hono là <code>app.request()</code>, không cần mở cổng. Mỗi endpoint có test cho đường thành công và mọi mã lỗi mà nó hứa trả, kiểm tra cả mã trạng thái, header quan trọng và body. Dữ liệu được reset trước mỗi test để các test độc lập. Logic thuần như tính học phí thì có unit test riêng.</p></div></details>
   <details><summary>Làm sao để các test không ảnh hưởng nhau?</summary><div><p>Mỗi test tự tạo dữ liệu nó cần, và trạng thái chung được reset trong <code>beforeEach</code>: xoá kho trong bộ nhớ, hoặc với database thật thì chạy trong transaction rồi rollback, hay dọn bảng. Không có test nào phụ thuộc vào thứ tự chạy.</p></div></details>
   <details><summary>Integration test cho API có cần database thật không?</summary><div><p>Tuỳ mục tiêu. Kho trong bộ nhớ cho test rất nhanh và đủ để kiểm tra route, validate, xử lý lỗi. Nhưng các ràng buộc của database như khoá duy nhất hay transaction thì chỉ test được với database thật, thường chạy bằng Docker trong CI. Mình sẽ có cả hai: phần lớn chạy nhanh với kho giả, một nhóm nhỏ chạy với database thật.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Test API gửi request vào app bằng <code>app.request()</code> và kiểm tra mã lẫn body, không cần mở server.</li>
+<li>Mỗi test tự dọn và tự tạo dữ liệu; mỗi bẫy đã biết có một test riêng.</li>
+<li>Thử làm hỏng code: test vẫn xanh nghĩa là còn chỗ chưa được kiểm tra.</li>
+</ol>
 </div>

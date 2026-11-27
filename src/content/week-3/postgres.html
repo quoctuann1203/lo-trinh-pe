@@ -1,3 +1,9 @@
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>PostgreSQL</strong> (gọi tắt Postgres) là một <strong>hệ quản trị cơ sở dữ liệu</strong>: chương trình chuyên lưu dữ liệu thành các bảng, giữ dữ liệu an toàn khi server sập, cho nhiều người đọc ghi cùng lúc, và trả lời câu hỏi bằng ngôn ngữ SQL.</p>
+<p>Hình dung một thủ thư rất cẩn thận quản lý kho sách. Bạn không tự vào kho lục lọi; bạn đưa phiếu yêu cầu ("tìm mọi sách của Nam Cao"), thủ thư tìm và đưa lại. Postgres là thủ thư, SQL là cách viết phiếu yêu cầu.</p>
+</div>
+
 <h2>Vì sao không lưu vào file JSON hay Map</h2>
 <p>API sách tuần 1 lưu dữ liệu trong một <code>Map</code>. Tắt server là mất hết. Lưu ra file JSON thì giữ được, nhưng ngay lập tức gặp ba vấn đề:</p>
 <ul>
@@ -6,6 +12,18 @@
   <li><strong>Tìm kiếm:</strong> muốn tìm "hoá đơn chưa trả của lớp 3" phải đọc toàn bộ file vào bộ nhớ rồi lọc.</li>
 </ul>
 <p>Cơ sở dữ liệu quan hệ giải quyết đúng ba việc đó: cho nhiều người ghi cùng lúc mà không mất dữ liệu, đảm bảo một thay đổi hoặc xong hẳn hoặc không xảy ra (transaction), và tìm kiếm nhanh nhờ index.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Database (cơ sở dữ liệu)</dt><dd>Nơi lưu dữ liệu có tổ chức, bền vững qua các lần tắt bật.</dd>
+<dt>Bảng (table)</dt><dd>Dữ liệu cùng loại, xếp thành hàng và cột, như một trang tính Excel có quy tắc chặt.</dd>
+<dt>Dòng (row)</dt><dd>Một bản ghi, ví dụ một cuốn sách.</dd>
+<dt>Cột (column)</dt><dd>Một thuộc tính, có kiểu cố định, ví dụ <code>title text</code>.</dd>
+<dt>SQL</dt><dd>Ngôn ngữ để hỏi và sửa dữ liệu: <code>SELECT</code>, <code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code>.</dd>
+<dt>Client và server</dt><dd>Postgres là server chạy riêng ở cổng 5432; app của bạn và <code>psql</code> là client gửi SQL tới.</dd>
+<dt><code>psql</code></dt><dd>Công cụ dòng lệnh đi kèm Postgres để gõ SQL và xem kết quả.</dd>
+<dt>Docker Compose</dt><dd>Công cụ chạy Postgres trong container bằng một file cấu hình, khỏi cài thẳng lên máy.</dd>
+</dl>
 
 <h2>Mô hình client và server</h2>
 <p>PostgreSQL là một chương trình chạy riêng, lắng nghe ở cổng <code>5432</code>. Ứng dụng của bạn là client: mở kết nối, gửi câu SQL dạng văn bản, nhận lại các dòng kết quả. <code>psql</code> là client dòng lệnh đi kèm Postgres. Tuần 5 bạn sẽ dùng thư viện để code TypeScript làm việc này thay cho <code>psql</code>.</p>
@@ -20,7 +38,7 @@
   </tbody>
 </table></div>
 
-<h2>Chạy Postgres bằng Docker Compose</h2>
+<h2>Làm thử: chạy Postgres bằng Docker Compose</h2>
 <p>Tạo thư mục <code>sql-practice</code>, trong đó tạo file <code>compose.yaml</code>:</p>
 <pre><code>services:
   db:
@@ -89,9 +107,26 @@ INSERT INTO books (title, author, year, price, tags) VALUES
   <p><span class="wrong">"Mật khẩu trong compose.yaml thì commit lên GitHub cũng được."</span><span class="fix">Chỉ chấp nhận được cho database tập trên máy mình. Database thật thì mật khẩu nằm trong biến môi trường, không bao giờ nằm trong Git.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Vì sao không lưu dữ liệu học phí vào một file JSON?</summary><div><p>Hai request ghi cùng lúc sẽ đè nhau, server sập giữa lúc ghi làm hỏng file, và tìm kiếm phải đọc cả file. Database giải quyết cả ba.</p></div></details>
+<details><summary>Trong <code>psql</code>, gõ <code>SELECT 1</code> rồi Enter mà không thấy kết quả, dấu nhắc đổi thành <code>hoc-#</code>. Vì sao?</summary><div><p>Quên dấu chấm phẩy. <code>psql</code> đang chờ bạn gõ tiếp câu SQL.</p></div></details>
+<details><summary><code>\dt</code> có phải là SQL không?</summary><div><p>Không, đó là lệnh của <code>psql</code> (liệt kê bảng), nên không cần dấu chấm phẩy và không chạy được từ code.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Vì sao dùng cơ sở dữ liệu quan hệ thay vì lưu file?</summary><div><p>Vì database lo ba việc mà tự làm rất khó: cho nhiều client ghi cùng lúc mà không mất dữ liệu, đảm bảo mỗi thay đổi hoặc xong trọn vẹn hoặc không xảy ra kể cả khi server sập, và tìm kiếm nhanh nhờ index. Ngoài ra ràng buộc giữ dữ liệu đúng bất kể code ứng dụng có lỗi.</p></div></details>
   <details><summary>Postgres khác SQLite thế nào, khi nào dùng cái nào?</summary><div><p>SQLite là một thư viện, cả database nằm trong một file và chạy cùng tiến trình với ứng dụng. Nó rất hợp cho app di động, công cụ dòng lệnh, hay web app nhỏ một server. Postgres là server riêng, nhiều ứng dụng kết nối qua mạng, chịu được nhiều người ghi đồng thời và có nhiều tính năng hơn. Với web app có nhiều người dùng như công cụ thu học phí, Postgres là lựa chọn mặc định an toàn.</p></div></details>
   <details><summary><code>serial</code> và <code>IDENTITY</code> khác nhau thế nào?</summary><div><p>Cả hai đều tạo cột id tự tăng dựa trên một sequence. <code>serial</code> là cú pháp riêng của Postgres, tạo sequence tách rời khỏi cột. <code>GENERATED ALWAYS AS IDENTITY</code> là chuẩn SQL, sequence gắn chặt với cột, và chặn chèn id bằng tay trừ khi bạn nói rõ <code>OVERRIDING SYSTEM VALUE</code>. Bảng mới nên dùng <code>IDENTITY</code>.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Postgres là server lưu dữ liệu thành bảng, an toàn khi sập và khi nhiều người ghi cùng lúc.</li>
+<li>App và <code>psql</code> là client gửi câu SQL tới cổng 5432.</li>
+<li>Chạy Postgres bằng Docker Compose, viết SQL trong file để commit và chạy lại được.</li>
+</ol>
 </div>
