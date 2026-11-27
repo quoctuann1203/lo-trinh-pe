@@ -38,6 +38,21 @@
   </tbody>
 </table></div>
 
+<h2>Docker là gì, và vì sao dùng nó để chạy Postgres</h2>
+<p>Cài Postgres thẳng vào máy cũng được, nhưng có ba phiền toái. Mỗi hệ điều hành cài một kiểu. Muốn đổi phiên bản thì phải gỡ cài lại. Và nó chạy ngầm mãi kể cả khi bạn không học. Docker giải quyết cả ba: chạy Postgres trong một "hộp" tách biệt, bật tắt bằng một lệnh, xoá đi không để lại gì.</p>
+<p>Bốn khái niệm cần nắm:</p>
+<div class="tbl"><table>
+  <thead><tr><th>Khái niệm</th><th>Là gì</th><th>Ví von</th></tr></thead>
+  <tbody>
+    <tr><td>Image</td><td>Gói đóng sẵn: hệ điều hành tối giản, chương trình Postgres, cấu hình mặc định. Chỉ đọc, không đổi</td><td>Bộ cài đặt</td></tr>
+    <tr><td>Container</td><td>Một lần chạy của image. Có hệ thống file riêng, mạng riêng, tiến trình riêng, tách khỏi máy bạn</td><td>Chương trình đã cài và đang chạy</td></tr>
+    <tr><td>Volume</td><td>Thư mục dữ liệu do Docker quản lý, nằm ngoài container. Xoá container thì volume vẫn còn</td><td>Ổ cứng gắn ngoài</td></tr>
+    <tr><td>Cổng (port)</td><td>Container có mạng riêng. <code>"5432:5432"</code> nối cổng 5432 của máy bạn vào cổng 5432 trong container</td><td>Lỗ khoét trên hộp để nói chuyện với bên trong</td></tr>
+  </tbody>
+</table></div>
+<p>Container khác máy ảo: nó không chạy cả một hệ điều hành riêng, mà dùng chung nhân hệ điều hành với máy chủ. Vì vậy nó bật trong một hai giây và tốn ít bộ nhớ. Trên macOS và Windows, Docker Desktop chạy ngầm một máy ảo Linux nhỏ để làm việc này.</p>
+<p>Docker Compose là cách mô tả container bằng một file <code>compose.yaml</code> thay vì gõ lệnh dài. File này nằm trong Git, ai clone repo về cũng chạy được đúng database giống bạn.</p>
+
 <h2>Làm thử: chạy Postgres bằng Docker Compose</h2>
 <p>Tạo thư mục <code>sql-practice</code>, trong đó tạo file <code>compose.yaml</code>:</p>
 <pre><code>services:
@@ -54,9 +69,25 @@
 
 volumes:
   pgdata:</code></pre>
+<p>Đọc từng dòng:</p>
+<div class="tbl"><table>
+  <thead><tr><th>Dòng</th><th>Nghĩa</th></tr></thead>
+  <tbody>
+    <tr><td><code>services: db:</code></td><td>Một container tên <code>db</code>. Các lệnh <code>docker compose</code> gọi nó bằng tên này</td></tr>
+    <tr><td><code>image: postgres:18</code></td><td>Dùng image chính thức của Postgres, phiên bản 18. Lần đầu chạy Docker sẽ tự tải về</td></tr>
+    <tr><td><code>environment:</code></td><td>Biến môi trường truyền vào container. Image Postgres đọc ba biến này để tạo sẵn user, mật khẩu và database ở lần chạy đầu</td></tr>
+    <tr><td><code>ports: "5432:5432"</code></td><td>Cổng máy bạn, dấu hai chấm, cổng trong container. Nếu máy bạn đã có gì chiếm 5432, đổi số bên trái, ví dụ <code>"5433:5432"</code></td></tr>
+    <tr><td><code>volumes: pgdata:/var/lib/postgresql</code></td><td>Gắn volume tên <code>pgdata</code> vào thư mục dữ liệu của Postgres trong container</td></tr>
+    <tr><td><code>volumes: pgdata:</code> ở cuối</td><td>Khai báo volume đó. Docker tự tạo nếu chưa có</td></tr>
+  </tbody>
+</table></div>
 <pre><code>docker compose up -d                          # chạy nền
 docker compose ps                             # cột STATUS phải là "running"
-docker compose exec db psql -U hoc -d hoc     # vào psql bên trong container</code></pre>
+docker compose exec db psql -U hoc -d hoc     # vào psql bên trong container
+docker compose logs db                        # xem log khi container không chạy
+docker compose down                           # tắt và xoá container, volume vẫn còn
+docker compose down -v                        # xoá cả volume: mất hết dữ liệu</code></pre>
+<p><code>exec db psql ...</code> nghĩa là: chạy lệnh <code>psql</code> bên trong container <code>db</code>. Bạn không cần cài <code>psql</code> lên máy, vì image Postgres có sẵn. Còn <code>-U hoc -d hoc</code> là đăng nhập bằng user <code>hoc</code> vào database <code>hoc</code>.</p>
 <p>Từ bản 18, image chính thức lưu dữ liệu dưới <code>/var/lib/postgresql</code> theo từng phiên bản, nên volume gắn vào thư mục đó. Nếu bạn làm theo hướng dẫn cũ gắn vào <code>/var/lib/postgresql/data</code>, container bản 18 sẽ báo lỗi và không chạy.</p>
 
 <h3>Vài lệnh psql cần thuộc</h3>

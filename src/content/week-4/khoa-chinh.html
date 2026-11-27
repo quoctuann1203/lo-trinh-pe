@@ -38,6 +38,26 @@
 );</code></pre>
 <p>Khoá thay thế dùng để nối bảng. <code>UNIQUE</code> trên khoá tự nhiên vẫn chặn hai giáo viên trùng số. Đổi số chỉ là một lệnh <code>UPDATE</code> trên một dòng.</p>
 
+<h2>Số tự tăng hoạt động thế nào</h2>
+<p>Cột <code>id bigint GENERATED ALWAYS AS IDENTITY</code> bạn viết từ tuần 3 là số tự tăng. Đằng sau nó là một sequence: một bộ đếm riêng trong database, mỗi lần được hỏi thì trả về số kế tiếp và tăng lên một. Mỗi lệnh <code>INSERT</code> không ghi <code>id</code> sẽ lấy một số từ bộ đếm đó.</p>
+<p>Hai điều hay làm người mới bất ngờ:</p>
+<pre><code>-- Bảng authors đang có một tác giả, id = 1
+BEGIN;
+INSERT INTO authors (name) VALUES ('Tạm') RETURNING id;   -- 2
+ROLLBACK;
+INSERT INTO authors (name) VALUES ('Tô Hoài') RETURNING id;   -- 3, không phải 2</code></pre>
+<ul>
+  <li><strong>Dãy số có lỗ hổng.</strong> Số đã lấy ra thì không trả lại, kể cả khi transaction bị huỷ. Đó là cố ý: nhờ vậy hai người <code>INSERT</code> cùng lúc không phải chờ nhau. Vì thế đừng dùng <code>id</code> làm số thứ tự hoá đơn cần liên tục.</li>
+  <li><strong><code>ALWAYS</code> cấm tự ghi id.</strong> <code>INSERT ... (id, name) VALUES (100, 'x')</code> báo lỗi <code>cannot insert a non-DEFAULT value into column "id"</code>. Như vậy không ai vô tình chèn một id trùng với số bộ đếm sẽ trả ra sau này.</li>
+</ul>
+
+<h2>UUID là gì</h2>
+<p>UUID (universally unique identifier) là một số 128 bit, tức 16 byte. Nó thường được viết thành 32 chữ số hệ 16, chia làm 5 nhóm bằng dấu gạch ngang:</p>
+<pre><code>2ede8ff6-b4f1-4766-a72d-c3f6047375b1      -- gen_random_uuid(): phiên bản 4
+01a21bd3-c1d1-76f6-b58e-cb1f2a59fad6      -- uuidv7(): phiên bản 7</code></pre>
+<p>Chữ số đầu của nhóm thứ ba cho biết phiên bản: <code>4</code> hoặc <code>7</code> ở hai ví dụ trên. Ý tưởng của UUID là không cần ai phát số: mỗi máy tự sinh, và không bao giờ trùng nhau trong thực tế. Bản v4 có 122 bit ngẫu nhiên. Phải sinh hàng tỉ tỉ giá trị thì khả năng trùng mới đáng kể. Bản v7 đặt thời điểm tạo tính bằng mili giây vào 48 bit đầu, phần còn lại ngẫu nhiên. Vì thế các UUID v7 sinh sau luôn lớn hơn các UUID sinh trước, gần giống số tự tăng.</p>
+<p>Postgres có kiểu riêng tên <code>uuid</code>, lưu đúng 16 byte. Đừng lưu UUID trong cột <code>text</code>: chuỗi 36 ký tự tốn hơn gấp đôi chỗ, và so sánh chậm hơn.</p>
+
 <h2>Ba lựa chọn cho khoá thay thế</h2>
 <div class="tbl"><table>
   <thead><tr><th></th><th><code>bigint IDENTITY</code></th><th>UUID v4</th><th>UUID v7</th></tr></thead>

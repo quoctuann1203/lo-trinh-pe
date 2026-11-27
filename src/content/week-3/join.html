@@ -17,6 +17,26 @@
 <dt>Chuẩn hoá</dt><dd>Tách dữ liệu ra nhiều bảng để mỗi sự thật chỉ nằm ở một chỗ.</dd>
 </dl>
 
+<h2>Khoá ngoại là gì</h2>
+<p>Khoá ngoại (foreign key) là một cột mà giá trị của nó phải là khoá chính của một dòng có thật ở bảng khác. <code>books.author_id</code> là khoá ngoại trỏ tới <code>authors.id</code>: nó nói "cuốn sách này của tác giả số 1". Bảng chứa khoá ngoại gọi là bảng con (<code>books</code>), bảng được trỏ tới gọi là bảng cha (<code>authors</code>).</p>
+<pre><code>CREATE TABLE books (
+  id        bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  author_id bigint REFERENCES authors (id),   -- khoá ngoại
+  title     text NOT NULL
+);</code></pre>
+<p><code>REFERENCES authors (id)</code> biến cột thành khoá ngoại. Postgres tự đặt tên cho ràng buộc này theo mẫu <code>bảng_cột_fkey</code>, ở đây là <code>books_author_id_fkey</code>. Từ lúc đó, database chặn hai việc:</p>
+<pre><code>-- 1. Trỏ tới tác giả không tồn tại
+INSERT INTO books (author_id, title) VALUES (999, 'Sách ma');
+-- ERROR:  insert or update on table "books" violates foreign key constraint "books_author_id_fkey"
+-- DETAIL:  Key (author_id)=(999) is not present in table "authors".
+
+-- 2. Xoá tác giả vẫn còn sách
+DELETE FROM authors WHERE id = 1;
+-- ERROR:  update or delete on table "authors" violates foreign key constraint "books_author_id_fkey" on table "books"
+-- DETAIL:  Key (id)=(1) is still referenced from table "books".</code></pre>
+<p>Không có khoá ngoại thì cả hai lệnh đều chạy được. Database sẽ có những cuốn sách trỏ vào hư không, và không ai biết cho tới khi một trang web hiện tên tác giả trống. Khoá ngoại không cấm giá trị <code>NULL</code>: cột không có <code>NOT NULL</code> thì sách vẫn được để trống tác giả. Bài "Kiểu dữ liệu và ràng buộc" đã nói cách chọn chuyện gì xảy ra khi xoá dòng cha.</p>
+<p>Khoá ngoại và <code>JOIN</code> là hai thứ khác nhau. Khoá ngoại là luật lúc ghi: nó bảo vệ dữ liệu. <code>JOIN</code> là phép ghép lúc đọc: nó nối hai bảng theo bất kỳ điều kiện nào bạn viết, có khoá ngoại hay không. Nhưng hầu như lúc nào bạn cũng <code>JOIN</code> theo đúng đường khoá ngoại: <code>ON a.id = b.author_id</code>.</p>
+
 <h2>JOIN hoạt động thế nào</h2>
 <p>Hình dung: với mỗi dòng ở bảng bên trái, database tìm mọi dòng ở bảng bên phải thoả điều kiện <code>ON</code>, và ghép từng cặp thành một dòng kết quả.</p>
 <pre><code>SELECT b.title, a.name AS author

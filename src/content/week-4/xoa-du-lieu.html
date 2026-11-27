@@ -75,7 +75,24 @@ CREATE UNIQUE INDEX classes_teacher_id_name_active_key
 <p>Index một phần (partial index) chỉ chứa những dòng thoả điều kiện <code>WHERE</code>. Hai lớp "Toán 6A" cùng tồn tại được nếu ít nhất một lớp đã lưu trữ. Hai lớp đang mở trùng tên thì vẫn bị chặn. Bảng <code>books</code> có đúng vấn đề này với <code>isbn</code>.</p>
 
 <h2>Lưu vết: created_at và updated_at</h2>
-<p>"Hoá đơn này ai sửa, sửa lúc nào?" là câu hỏi sẽ đến, thường là khi có phụ huynh thắc mắc. Mức tối thiểu là hai cột thời gian. <code>DEFAULT now()</code> lo phần lúc tạo. Phần lúc sửa cần một trigger, vì <code>DEFAULT</code> chỉ chạy khi <code>INSERT</code>:</p>
+<p>"Hoá đơn này ai sửa, sửa lúc nào?" là câu hỏi sẽ đến, thường là khi có phụ huynh thắc mắc. Mức tối thiểu là hai cột thời gian. <code>DEFAULT now()</code> lo phần lúc tạo. Phần lúc sửa cần một trigger, vì <code>DEFAULT</code> chỉ chạy khi <code>INSERT</code>.</p>
+<h3>Trigger là gì</h3>
+<p>Trigger là một hàm mà database tự gọi mỗi khi có một sự kiện trên bảng: <code>INSERT</code>, <code>UPDATE</code> hoặc <code>DELETE</code>. Bạn không gọi nó. Bạn chỉ đăng ký "khi có chuyện này trên bảng này thì chạy hàm kia". Từ đó, mọi câu lệnh thoả điều kiện đều kích hoạt nó, bất kể đến từ code ứng dụng, từ psql, hay từ một service khác.</p>
+<p>Một trigger có hai phần: hàm, và lời đăng ký gắn hàm vào bảng.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Phần</th><th>Nghĩa</th></tr></thead>
+  <tbody>
+    <tr><td><code>CREATE FUNCTION ... RETURNS trigger</code></td><td>Một hàm đặc biệt chỉ dùng được cho trigger</td></tr>
+    <tr><td><code>LANGUAGE plpgsql</code></td><td>Ngôn ngữ lập trình có sẵn trong Postgres, có biến, <code>IF</code>, vòng lặp</td></tr>
+    <tr><td><code>AS $$ ... $$</code></td><td>Thân hàm, viết giữa hai cặp <code>$$</code> để khỏi phải thoát dấu nháy bên trong</td></tr>
+    <tr><td><code>NEW</code></td><td>Dòng sắp được ghi. Trong trigger <code>BEFORE</code>, sửa <code>NEW</code> là sửa luôn thứ sẽ được ghi xuống. Có thêm <code>OLD</code>: dòng trước khi sửa</td></tr>
+    <tr><td><code>RETURN NEW</code></td><td>Cho phép ghi dòng đã sửa. Trả về <code>NULL</code> thì dòng đó bị bỏ qua</td></tr>
+    <tr><td><code>BEFORE UPDATE ON books</code></td><td>Chạy trước khi mỗi lệnh <code>UPDATE</code> trên <code>books</code> ghi dữ liệu. <code>AFTER</code> chạy sau, không sửa được dòng nữa</td></tr>
+    <tr><td><code>FOR EACH ROW</code></td><td>Chạy một lần cho mỗi dòng bị sửa. <code>UPDATE</code> 100 dòng thì hàm chạy 100 lần</td></tr>
+  </tbody>
+</table></div>
+<p>Trigger mạnh nhưng ẩn: người đọc code ứng dụng không thấy nó. Chỉ dùng cho việc nhỏ, rõ ràng, luôn đúng như <code>updated_at</code>. Logic nghiệp vụ như tính tiền nên nằm trong code, nơi có test.</p>
+<p>Migration đầy đủ:</p>
 <pre><code>-- migrate:up
 CREATE FUNCTION set_updated_at() RETURNS trigger
 LANGUAGE plpgsql AS $$

@@ -17,6 +17,26 @@
 <dt><code>CREATE INDEX CONCURRENTLY</code></dt><dd>Tạo index mà không chặn ghi vào bảng.</dd>
 </dl>
 
+<h2>Khoá (lock) là gì</h2>
+<p>Tiếng Việt dùng chữ "khoá" cho hai thứ khác hẳn nhau. Khoá chính, khoá ngoại là key: cột dùng để nhận diện một dòng. Bài này nói về lock: quyền tạm giữ một bảng hay một dòng để không ai làm điều xung đột trong lúc mình đang làm.</p>
+<p>Hình dung một cuốn sổ thu tiền đặt trên bàn. Nhiều người cùng đọc được. Nhiều người cùng ghi được, mỗi người một dòng. Nhưng nếu ai đó muốn kẻ thêm một cột mới cho cả cuốn sổ, họ phải cầm cả cuốn đi, và mọi người khác phải chờ. Postgres làm đúng như vậy. Mỗi câu lệnh tự xin một mức khoá trên bảng nó đụng tới. Bạn không phải viết gì cả.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Mức khoá</th><th>Ai xin</th><th>Chặn ai</th></tr></thead>
+  <tbody>
+    <tr><td><code>ACCESS SHARE</code></td><td><code>SELECT</code></td><td>Chỉ chặn <code>ACCESS EXCLUSIVE</code></td></tr>
+    <tr><td><code>ROW EXCLUSIVE</code></td><td><code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code></td><td>Không chặn nhau, không chặn <code>SELECT</code>. Chặn <code>CREATE INDEX</code> thường và các lệnh mạnh hơn</td></tr>
+    <tr><td><code>SHARE UPDATE EXCLUSIVE</code></td><td><code>CREATE INDEX CONCURRENTLY</code>, <code>VALIDATE CONSTRAINT</code></td><td>Không chặn đọc ghi bình thường</td></tr>
+    <tr><td><code>SHARE</code></td><td><code>CREATE INDEX</code> thường</td><td>Chặn mọi lệnh ghi, vẫn cho đọc</td></tr>
+    <tr><td><code>ACCESS EXCLUSIVE</code></td><td>Hầu hết <code>ALTER TABLE</code>, <code>DROP TABLE</code></td><td>Chặn tất cả, kể cả <code>SELECT</code></td></tr>
+  </tbody>
+</table></div>
+<p>Một điều quan trọng: khoá được giữ tới khi transaction kết thúc, không phải tới khi câu lệnh chạy xong. Một <code>SELECT</code> trong transaction chưa <code>COMMIT</code> vẫn giữ <code>ACCESS SHARE</code> trên bảng đó. Bạn có thể xem ai đang giữ khoá gì:</p>
+<pre><code>SELECT l.pid, l.mode, l.granted, left(a.query, 40) AS query
+FROM pg_locks l
+JOIN pg_stat_activity a ON a.pid = l.pid
+WHERE l.relation = 'students'::regclass;</code></pre>
+<p>Cột <code>granted</code> là <code>t</code> nghĩa là đã được cấp, <code>f</code> nghĩa là đang chờ. Bạn sẽ dùng câu này trong thí nghiệm bên dưới.</p>
+
 <h2>Vấn đề không nằm ở SQL, mà ở khoá</h2>
 <p>Hầu hết lệnh <code>ALTER TABLE</code> cần khoá mạnh nhất của PostgreSQL trên bảng đó, gọi là <code>ACCESS EXCLUSIVE</code>. Trong lúc giữ khoá, không ai đọc hay ghi được bảng. Nếu lệnh chỉ đổi thông tin mô tả bảng, khoá được giữ vài mili giây và không ai nhận ra. Nếu lệnh phải đọc hay viết lại mọi dòng, khoá được giữ đúng bằng thời gian đó: vài giây với một triệu dòng, vài phút với một trăm triệu dòng.</p>
 <p>Còn một cái bẫy tệ hơn: hàng đợi khoá. Thử với ba cửa sổ psql:</p>
@@ -29,7 +49,7 @@ ALTER TABLE students ADD COLUMN nickname text;
 
 -- Cửa sổ 3: một người dùng chỉ muốn đọc. Lệnh này cũng đứng chờ!
 SELECT name FROM students LIMIT 1;</code></pre>
-<p>Cửa sổ 3 chỉ cần khoá đọc, vốn không xung đột với cửa sổ 1. Nhưng nó phải xếp hàng sau lệnh <code>ALTER</code> đang chờ. Một lệnh <code>ALTER</code> lẽ ra chạy trong 1 mili giây, chỉ vì chờ một transaction chậm, đã làm cả bảng đứng im. Gõ <code>COMMIT</code> ở cửa sổ 1 và xem hai cửa sổ kia chạy tiếp.</p>
+<p>Cửa sổ 3 chỉ cần khoá đọc, vốn không xung đột với cửa sổ 1. Nhưng nó phải xếp hàng sau lệnh <code>ALTER</code> đang chờ. Một lệnh <code>ALTER</code> lẽ ra chạy trong 1 mili giây, chỉ vì chờ một transaction chậm, đã làm cả bảng đứng im. Trước khi gõ <code>COMMIT</code>, mở cửa sổ thứ tư và chạy câu <code>pg_locks</code> ở trên. Bạn sẽ thấy cửa sổ 1 giữ <code>AccessShareLock</code> với <code>granted = t</code>, cửa sổ 2 xin <code>AccessExclusiveLock</code> với <code>granted = f</code>. Rồi gõ <code>COMMIT</code> ở cửa sổ 1 và xem hai cửa sổ kia chạy tiếp.</p>
 
 <h2>lock_timeout: thà thất bại còn hơn chặn mọi người</h2>
 <p>Lặp lại thí nghiệm, nhưng ở cửa sổ 2 đặt giới hạn thời gian chờ khoá:</p>

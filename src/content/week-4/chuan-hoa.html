@@ -57,6 +57,45 @@
     <tr><td>3NF</td><td>Cột này có phụ thuộc vào khoá <em>qua</em> một cột khác không?</td><td>"sdt_giao_vien" phụ thuộc vào giáo viên, giáo viên phụ thuộc vào lớp. Nó thuộc về bảng giáo viên</td></tr>
   </tbody>
 </table></div>
+<p>Cả ba câu hỏi đều dựa vào một ý: phụ thuộc. Cột B phụ thuộc vào cột A nếu biết A là biết chắc B. Biết mã lớp là biết học phí của lớp, nên học phí phụ thuộc vào mã lớp. Biết tên học sinh thì chưa chắc biết lớp, vì có thể có hai bạn tên An. Đi qua từng dạng chuẩn bằng ví dụ:</p>
+
+<h3>1NF: mỗi ô một giá trị</h3>
+<div class="tbl"><table>
+  <thead><tr><th>hoc_sinh</th><th>cac_lop</th></tr></thead>
+  <tbody>
+    <tr><td>An</td><td>Toán 6A, Lý 6B</td></tr>
+  </tbody>
+</table></div>
+<p>Muốn biết "lớp Lý 6B có những ai" thì phải tìm chuỗi con trong từng ô. Muốn An nghỉ lớp Lý thì phải cắt chuỗi. Không đặt được khoá ngoại tới bảng lớp. Tách thành mỗi cặp một dòng:</p>
+<div class="tbl"><table>
+  <thead><tr><th>hoc_sinh</th><th>lop</th></tr></thead>
+  <tbody>
+    <tr><td>An</td><td>Toán 6A</td></tr>
+    <tr><td>An</td><td>Lý 6B</td></tr>
+  </tbody>
+</table></div>
+
+<h3>2NF: phụ thuộc vào cả khoá, không chỉ một phần</h3>
+<p>Bảng ghi danh vừa tách có khoá gồm hai cột <code>(hoc_sinh, lop)</code>. Giả sử thêm cột ngày vào lớp và học phí:</p>
+<div class="tbl"><table>
+  <thead><tr><th>hoc_sinh</th><th>lop</th><th>ngay_vao</th><th>hoc_phi_lop</th></tr></thead>
+  <tbody>
+    <tr><td>An</td><td>Toán 6A</td><td>05/01</td><td>800.000</td></tr>
+    <tr><td>Bình</td><td>Toán 6A</td><td>12/02</td><td>800.000</td></tr>
+  </tbody>
+</table></div>
+<p><code>ngay_vao</code> cần cả hai cột của khoá mới biết được, vì mỗi học sinh vào mỗi lớp một ngày khác. Nó đúng chỗ. <code>hoc_phi_lop</code> chỉ cần biết <code>lop</code>, tức chỉ một nửa khoá. Hậu quả là học phí lặp lại ở mọi học sinh trong lớp. Tăng học phí thì phải sửa 30 dòng. Học phí chuyển sang bảng <code>classes</code>, nơi khoá chỉ là lớp.</p>
+
+<h3>3NF: không phụ thuộc qua trung gian</h3>
+<div class="tbl"><table>
+  <thead><tr><th>lop (khoá)</th><th>giao_vien</th><th>sdt_giao_vien</th></tr></thead>
+  <tbody>
+    <tr><td>Toán 6A</td><td>cô Lan</td><td>0912…</td></tr>
+    <tr><td>Toán 7B</td><td>cô Lan</td><td>0912…</td></tr>
+  </tbody>
+</table></div>
+<p>Khoá chỉ có một cột nên bảng đã đạt 2NF. Nhưng <code>sdt_giao_vien</code> không nói về lớp. Nó nói về giáo viên, và giáo viên mới phụ thuộc vào lớp. Chuỗi phụ thuộc là lớp → giáo viên → số điện thoại. Kiểu phụ thuộc qua trung gian này gọi là phụ thuộc bắc cầu. Số của cô Lan lặp lại ở mọi lớp cô dạy. Tách giáo viên ra bảng <code>teachers</code>, lớp chỉ giữ <code>teacher_id</code>.</p>
+
 <p>Gộp lại thành một câu dễ nhớ: mỗi cột phải nói về khoá, cả khoá, và chỉ khoá. Đa số schema web dừng ở 3NF là đủ. Các dạng chuẩn cao hơn trong video có thật, nhưng hiếm khi gặp trong sản phẩm.</p>
 <p>Bảng <code>books</code> của tuần 3 có cột <code>tags text[]</code>, nhìn qua thì vi phạm 1NF. Đó là một lựa chọn có chủ ý: thẻ chỉ dùng để lọc và hiển thị, không có thông tin riêng nào cần sửa ở một chỗ. Khi thẻ cần có tên hiển thị, màu, người tạo, nó phải thành bảng riêng. Phá quy tắc thì được, miễn là bạn nói được vì sao.</p>
 
