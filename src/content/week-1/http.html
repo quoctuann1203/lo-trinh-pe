@@ -1,3 +1,34 @@
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>HTTP</strong> là ngôn ngữ chung mà trình duyệt, app và server dùng để nói chuyện: bên gửi viết một <strong>request</strong> (muốn làm gì, với cái gì), bên nhận trả một <strong>response</strong> (kết quả ra sao, kèm dữ liệu).</p>
+<p>Hình dung gửi thư qua bưu điện. Phong bì ghi rõ <strong>việc cần làm</strong> (method: đọc, tạo, sửa, xoá) và <strong>địa chỉ</strong> (đường dẫn <code>/books/42</code>). Thư trả lời luôn có một <strong>con số ở đầu</strong> (mã trạng thái) để biết ngay là thành công hay hỏng, trước cả khi đọc nội dung.</p>
+</div>
+
+<h2>Vì sao phải nắm chắc HTTP</h2>
+<p>Ở front-end bạn đã gọi <code>fetch</code>, nhưng thường chỉ quan tâm dữ liệu trả về. Khi viết API, bạn là người <strong>chọn</strong> method và mã trạng thái. Chọn sai thì front-end, cache, công cụ theo dõi lỗi và cơ chế tự thử lại đều hiểu sai: lỗi bị coi là thành công, hoặc một lần bấm "Thanh toán" bị gửi lại thành thu tiền hai lần.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Request</dt><dd>Yêu cầu gửi tới server: method, đường dẫn, header, có thể kèm body.</dd>
+<dt>Response</dt><dd>Câu trả lời của server: mã trạng thái, header, có thể kèm body.</dd>
+<dt>Method</dt><dd>Động từ của request: <code>GET</code> đọc, <code>POST</code> tạo, <code>PUT</code>/<code>PATCH</code> sửa, <code>DELETE</code> xoá.</dd>
+<dt>Header</dt><dd>Các dòng thông tin phụ dạng <code>Tên: giá trị</code>, ví dụ <code>Content-Type: application/json</code>.</dd>
+<dt>Body</dt><dd>Phần nội dung chính, thường là JSON.</dd>
+<dt>Mã trạng thái</dt><dd>Con số 3 chữ số ở đầu response. 2xx thành công, 4xx lỗi do bên gửi, 5xx lỗi do server.</dd>
+<dt>Không lưu trạng thái (stateless)</dt><dd>Server không nhớ request trước. Mỗi request phải tự mang đủ thông tin, ví dụ token đăng nhập.</dd>
+<dt>Safe</dt><dd>Method chỉ đọc, không đổi gì trên server (<code>GET</code>).</dd>
+<dt>Idempotent</dt><dd>Gọi 1 lần hay 10 lần thì trạng thái server cuối cùng như nhau.</dd>
+</dl>
+
+<h2>Một lần gọi API diễn ra thế nào</h2>
+<ol class="steps">
+<li><strong>Client viết request</strong>: chọn method và đường dẫn, thêm header (kiểu dữ liệu, token), thêm body nếu cần.</li>
+<li><strong>Request đi qua mạng</strong> tới server ở địa chỉ và cổng đã cho, ví dụ <code>localhost:3000</code>.</li>
+<li><strong>Server đọc request</strong>, tìm route khớp, chạy code xử lý.</li>
+<li><strong>Server chọn mã trạng thái</strong> phù hợp với kết quả, gửi response kèm header và body.</li>
+<li><strong>Client đọc mã trước</strong> để biết thành công hay lỗi, rồi mới đọc body.</li>
+</ol>
+
 <h2>Một request và một response</h2>
 <p>HTTP không lưu trạng thái: mỗi request tự mang đủ thông tin, ví dụ token đăng nhập.</p>
 <pre><code>POST /books HTTP/1.1                  <span class="c">← method, đường dẫn, phiên bản</span>
@@ -12,7 +43,7 @@ Content-Type: application/json
 Location: /books/3f2a9c1e-...           <span class="c">← địa chỉ tài nguyên vừa tạo</span>
 
 {"id":"3f2a9c1e-...","title":"Dế Mèn"}</code></pre>
-<p>Chạy <code>curl -v</code> để thấy đúng những dòng này.</p>
+
 <h2>Method, safe và idempotent</h2>
 <div class="tbl"><table>
 <thead><tr><th>Method</th><th>Ý nghĩa</th><th>Safe</th><th>Idempotent</th></tr></thead>
@@ -56,16 +87,42 @@ Location: /books/3f2a9c1e-...           <span class="c">← địa chỉ tài ng
 <li><strong>409 và 422.</strong> 422: dữ liệu tự nó sai, gửi lúc nào cũng sai. 409: dữ liệu đúng, chỉ xung đột với trạng thái hiện tại.</li>
 <li><strong>500 và 503.</strong> 500: code gặp lỗi bất ngờ. 503: server chủ động báo tạm thời không phục vụ, nên thử lại sau.</li>
 </ul>
+<h2>Làm thử: nhìn tận mắt request và response</h2>
+<p><code>curl</code> là công cụ gửi request từ terminal; cờ <code>-v</code> in ra cả hai chiều. Thử với một API công khai:</p>
+<pre><code>curl -v https://api.github.com/users/octocat</code></pre>
+<p>Dòng bắt đầu bằng <code>&gt;</code> là request bạn gửi (method <code>GET</code>, đường dẫn, header). Dòng bắt đầu bằng <code>&lt;</code> là response (dòng đầu có <code>200</code>, rồi các header). Cuối cùng là body JSON.</p>
+<p>Giờ thử một người dùng không tồn tại và chỉ in mã trạng thái:</p>
+<pre><code>curl -s -o /dev/null -w "%{http_code}\n" https://api.github.com/users/khong-ton-tai-123456789
+# 404</code></pre>
+<p>Cùng đường dẫn đúng dạng, nhưng bản ghi không có, nên server trả 404.</p>
+
 <h2>Bút đỏ: những câu nghe đúng mà sai</h2>
 <div class="redpen">
 <p><span class="wrong">"Trả 200 kèm { success: false } cho mọi lỗi cũng được."</span><span class="fix">Không nên. Cache, theo dõi lỗi, cơ chế tự thử lại đều đọc mã trạng thái và sẽ coi lỗi là thành công.</span></p>
 <p><span class="wrong">"PUT và PATCH như nhau."</span><span class="fix">Không. PUT thay toàn bộ, trường nào không gửi sẽ mất. PATCH chỉ đổi trường được gửi.</span></p>
 <p><span class="wrong">"404 nghĩa là gõ sai URL."</span><span class="fix">Không chỉ vậy. URL đúng nhưng bản ghi không tồn tại cũng là 404.</span></p>
 </div>
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Giáo viên đã đăng nhập, nhưng cố xem hoá đơn lớp của giáo viên khác. Trả mã gì?</summary><div><p>403: server biết họ là ai, nhưng họ không có quyền. 401 là khi chưa biết là ai.</p></div></details>
+<details><summary>Body gửi lên có học phí mỗi buổi là -50000. Trả mã gì?</summary><div><p>422 (hoặc 400 nếu API của bạn dùng chung cho mọi lỗi dữ liệu): đọc được request nhưng dữ liệu sai quy tắc.</p></div></details>
+<details><summary>Vì sao không nên trả 200 kèm <code>{ success: false }</code> khi lỗi?</summary><div><p>Vì cache, công cụ theo dõi lỗi và cơ chế tự thử lại chỉ đọc mã trạng thái; họ sẽ coi lỗi là thành công.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
 <details><summary>PUT, PATCH và POST khác nhau thế nào?</summary><div><p>POST tạo mới hoặc ra lệnh, không idempotent. PUT thay toàn bộ tài nguyên ở một URL xác định, idempotent. PATCH sửa một phần, không đảm bảo idempotent: "tăng số buổi thêm 1" gọi hai lần sẽ tăng hai.</p></div></details>
 <details><summary>Idempotent là gì? Vì sao quan trọng với thanh toán?</summary><div><p>Gọi nhiều lần để lại trạng thái server như gọi một lần. Mạng không ổn định nên client sẽ thử lại; nếu thanh toán không idempotent thì thử lại có thể thu tiền hai lần. Dùng <code>Idempotency-Key</code> để server trả lại kết quả cũ.</p></div></details>
 <details><summary>401 và 403 khác gì?</summary><div><p>401 là chưa xác thực được bạn là ai (thiếu hoặc sai token), đăng nhập lại có thể giải quyết. 403 là biết bạn là ai nhưng bạn không có quyền.</p></div></details>
 <details><summary>Đăng ký bằng email đã có thì trả mã gì?</summary><div><p>409 Conflict: email hợp lệ nhưng xung đột với dữ liệu đã có. Nếu lo bị dò email đã đăng ký, có thể trả một thông báo chung cho mọi trường hợp và gửi email riêng cho chủ tài khoản.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>HTTP là request (method, đường dẫn, header, body) và response (mã trạng thái, header, body); server không nhớ request trước.</li>
+<li>Mã trạng thái nói kết quả: 2xx thành công, 4xx lỗi phía gửi, 5xx lỗi phía server. Chọn đúng mã là việc của bạn.</li>
+<li>Idempotent nghĩa là gọi lại an toàn; thanh toán cần <code>Idempotency-Key</code> để không thu tiền hai lần.</li>
+</ol>
 </div>

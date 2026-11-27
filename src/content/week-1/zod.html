@@ -1,6 +1,33 @@
-<h2>Ranh giới tin cậy</h2>
-<p>Những cửa vào cần kiểm tra: body, path param, query, header; biến môi trường; webhook của ngân hàng hay cổng thanh toán; response của API bên ngoài; file tải lên. Validate ở front-end giúp trải nghiệm tốt hơn. Validate ở server mới là bảo vệ thật, vì ai cũng gọi thẳng API được bằng curl.</p>
-<h2>Schema vừa kiểm tra vừa sinh kiểu</h2>
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Validate</strong> là kiểm tra dữ liệu từ bên ngoài gửi vào có đúng dạng không trước khi dùng. <strong>zod</strong> là thư viện giúp bạn mô tả "dữ liệu đúng trông thế nào" một lần, rồi dùng mô tả đó vừa để kiểm tra lúc chạy, vừa để TypeScript biết kiểu.</p>
+<p>Hình dung bảo vệ ở cổng trường kiểm tra thẻ học sinh. Ai không có thẻ, thẻ sai tên, hay thẻ hết hạn thì không vào. Bên trong trường, thầy cô không phải hỏi lại "em có phải học sinh không". zod là người bảo vệ ở cổng API.</p>
+</div>
+
+<h2>Vì sao phải validate ở server</h2>
+<p>TypeScript chỉ kiểm tra lúc bạn viết code. Khi chạy, kiểu bị xoá hết, và dữ liệu từ request có thể là bất cứ thứ gì: thiếu trường, số âm, chuỗi thay vì số, hay thêm trường lạ như <code>paid: true</code>. Ai cũng gọi thẳng API được bằng <code>curl</code>, không cần qua form của bạn. Validate ở front-end chỉ giúp người dùng thấy lỗi sớm; validate ở server mới là bảo vệ thật.</p>
+<p>Những cửa vào cần kiểm tra: body, tham số trên đường dẫn, query, header; biến môi trường; webhook của ngân hàng hay cổng thanh toán; response của API bên ngoài; file tải lên.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Validate</dt><dd>Kiểm tra dữ liệu có đúng quy tắc không, trước khi dùng.</dd>
+<dt>Schema</dt><dd>Bản mô tả dữ liệu đúng: có những trường nào, mỗi trường kiểu gì, giới hạn gì.</dd>
+<dt><code>parse</code></dt><dd>Kiểm tra theo schema. Đúng thì trả dữ liệu đã làm sạch; sai thì ném <code>ZodError</code>.</dd>
+<dt><code>safeParse</code></dt><dd>Như <code>parse</code> nhưng không ném lỗi, trả <code>{ success, data }</code> hoặc <code>{ success, error }</code>.</dd>
+<dt><code>z.infer</code></dt><dd>Lấy kiểu TypeScript ra từ schema, để khỏi viết kiểu hai lần.</dd>
+<dt>Coerce</dt><dd>Ép kiểu, ví dụ chuỗi <code>'5'</code> thành số <code>5</code>. Cần cho query string vì query luôn là chuỗi.</dd>
+<dt>Mass assignment</dt><dd>Lỗ hổng khi server ghi nguyên object client gửi vào database, để client tự đặt trường như <code>role</code>, <code>paid</code>.</dd>
+</dl>
+
+<h2>zod kiểm tra dữ liệu thế nào</h2>
+<ol class="steps">
+<li><strong>Viết schema</strong> một lần: trường nào, kiểu gì, giới hạn gì.</li>
+<li><strong>Nhận dữ liệu thô</strong> từ request. Lúc này coi nó là <code>unknown</code>, chưa tin.</li>
+<li><strong>Gọi <code>parse</code> hoặc <code>safeParse</code></strong>: zod đi qua từng trường, so với schema.</li>
+<li><strong>Sai</strong> thì nhận danh sách lỗi theo từng trường để trả 400 hoặc 422. <strong>Đúng</strong> thì nhận object sạch: trường lạ bị bỏ, kiểu đã chắc chắn.</li>
+</ol>
+
+<h2>Dùng trong API: schema vừa kiểm tra vừa sinh kiểu</h2>
 <pre><code>import * as z from 'zod';
 
 const PaymentInput = z.object({
@@ -37,16 +64,51 @@ Slug.parse('  Dế Mèn Phiêu Lưu  '); <span class="c">// 'dế-mèn-phiêu-l�
 });
 export const env = Env.parse(process.env); <span class="c">// sai là sập ngay khi khởi động</span></code></pre>
 <p>Thiếu <code>DATABASE_URL</code> thì nên sập ngay với thông báo rõ ràng, thay vì lỗi lúc 2 giờ sáng khi có request đầu tiên cần database. Cách làm này gọi là <em>fail fast</em>.</p>
+<h2>Làm thử: để zod bắt lỗi giúp bạn</h2>
+<p>Trong một thư mục trống: <code>npm init -y</code>, <code>npm i zod</code>, rồi tạo file <code>thu.mjs</code>:</p>
+<pre><code>import * as z from 'zod';
+
+const Book = z.object({
+  title: z.string().min(1),
+  price: z.number().int().positive(),
+});
+
+console.log(Book.parse({ title: 'Dế Mèn', price: 50000, hack: true }));
+// { title: 'Dế Mèn', price: 50000 }   trường lạ "hack" bị bỏ
+
+const r = Book.safeParse({ title: '', price: -1 });
+console.log(r.success);                       // false
+console.log(z.flattenError(r.error).fieldErrors);
+// { title: [ '...' ], price: [ '...' ] }     mỗi trường sai một danh sách lỗi</code></pre>
+<p>Chạy <code>node thu.mjs</code>. Thử đổi <code>price</code> thành chuỗi <code>'50000'</code> và xem zod báo gì.</p>
+
 <h2>Bút đỏ: những câu nghe đúng mà sai</h2>
 <div class="redpen">
 <p><span class="wrong">"Có TypeScript rồi thì không cần validate."</span><span class="fix">Sai. Kiểu bị xoá khi chạy. body as Book chỉ là hứa với trình biên dịch.</span></p>
 <p><span class="wrong">"z.coerce.boolean() đọc ?paid=false thành false."</span><span class="fix">Sai. Nó dùng Boolean(x), nên chuỗi 'false' thành true. Dùng z.stringbool().</span></p>
 <p><span class="wrong">"PATCH dùng CreateSchema.partial() là xong."</span><span class="fix">Coi chừng: .partial() vẫn giữ .default(). tags: .default([]) sẽ ghi đè tags thành [] mỗi lần PATCH.</span></p>
 </div>
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Đã có <code>type Book = { title: string }</code>, viết <code>const b = body as Book</code>. Vì sao chưa an toàn?</summary><div><p><code>as</code> chỉ là lời hứa với TypeScript, không kiểm tra gì lúc chạy. Body thật vẫn có thể thiếu <code>title</code>.</p></div></details>
+<details><summary>Query <code>?page=2</code>. Schema <code>z.number()</code> có nhận không?</summary><div><p>Không, vì query luôn là chuỗi <code>'2'</code>. Dùng <code>z.coerce.number()</code>.</p></div></details>
+<details><summary>Client gửi thêm <code>role: 'admin'</code> vào body đăng ký. Schema <code>z.object</code> không khai báo <code>role</code>. Chuyện gì xảy ra?</summary><div><p>zod bỏ trường <code>role</code>, nên dữ liệu ghi xuống không có nó. Muốn từ chối hẳn request thì dùng <code>z.strictObject</code>.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
 <details><summary>Đã dùng TypeScript, sao còn cần zod?</summary><div><p>TypeScript chỉ kiểm tra lúc biên dịch, kiểu bị xoá khi chạy. Dữ liệu từ request là <code>unknown</code>. zod kiểm tra dữ liệu thật lúc chạy và suy ra kiểu từ cùng một schema, nên kiểu và bộ kiểm tra không lệch nhau.</p></div></details>
 <details><summary>Validate ở client hay server?</summary><div><p>Cả hai, vì hai mục đích. Client để phản hồi ngay cho người dùng. Server để bảo vệ dữ liệu, và đây là lớp bắt buộc. Với TypeScript hai phía có thể dùng chung schema.</p></div></details>
 <details><summary>Mass assignment là gì, phòng thế nào?</summary><div><p>Server ghi nguyên object client gửi vào database, khiến client tự đặt được trường chỉ server được đặt như <code>role</code>, <code>paid</code>. Phòng bằng cách chỉ nhận trường đã khai báo: zod tự bỏ trường lạ, hoặc dùng <code>strictObject</code>.</p></div></details>
 <details><summary>Vì sao validate biến môi trường lúc khởi động?</summary><div><p>Để cấu hình sai làm deploy thất bại ngay với thông báo rõ ràng, thay vì server chạy rồi hỏng ở request đầu tiên. Code bên trong dùng <code>env.PORT</code> đã có kiểu.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Dữ liệu từ bên ngoài luôn là <code>unknown</code>; validate ở server mới là bảo vệ thật.</li>
+<li>Một schema zod vừa kiểm tra lúc chạy, vừa sinh kiểu TypeScript bằng <code>z.infer</code>.</li>
+<li>zod bỏ trường lạ để chống mass assignment; query cần <code>coerce</code>; biến môi trường validate ngay khi khởi động.</li>
+</ol>
 </div>

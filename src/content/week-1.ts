@@ -275,7 +275,7 @@ export const week1: Week = {
       "title": "Hono và cách một web framework hoạt động",
       "navTitle": "Hono và web framework",
       "day": "Thứ Năm",
-      "lead": "Framework làm sẵn ba việc: chọn hàm nào xử lý request nào (routing), chạy code trước và sau handler (middleware), và cho tiện ích đọc request, tạo response. Hono làm việc đó trên chuẩn <code>Request</code>/<code>Response</code> của Web.",
+      "lead": "Web framework là gì, vì sao viết API không nên tự làm từ đầu, Hono xử lý một request qua những bước nào, và cách viết API đầu tiên bằng Hono trong 5 phút.",
       "videos": [
         {
           "id": "1XyL9cbFooE",

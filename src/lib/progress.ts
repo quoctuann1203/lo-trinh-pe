@@ -3,10 +3,11 @@
 import { useSyncExternalStore } from 'react';
 
 /** Tiến độ học lưu trong localStorage của trình duyệt này. */
-type Progress = { done: Record<string, boolean>; goals: Record<string, boolean> };
+/** `map` là các mục đã xong trên bản đồ Full Stack (/ban-do), theo id của mục. */
+type Progress = { done: Record<string, boolean>; goals: Record<string, boolean>; map: Record<string, boolean> };
 
 const KEY = 'pe-roadmap-progress-v1';
-const EMPTY: Progress = { done: {}, goals: {} };
+const EMPTY: Progress = { done: {}, goals: {}, map: {} };
 const listeners = new Set<() => void>();
 let cache: Progress | null = null;
 
@@ -47,6 +48,10 @@ export function useProgress() {
     toggleGoal(key: string) {
       const p = read();
       write({ ...p, goals: { ...p.goals, [key]: !p.goals[key] } });
+    },
+    toggleMap(id: string) {
+      const p = read();
+      write({ ...p, map: { ...p.map, [id]: !p.map[id] } });
     },
   };
 }

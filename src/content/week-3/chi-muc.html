@@ -1,3 +1,30 @@
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Index</strong> (chỉ mục) là một cấu trúc phụ database tạo cho một cột, để tìm dòng theo cột đó mà không phải đọc cả bảng. Có index đúng chỗ, câu truy vấn mất vài mili-giây thay vì vài giây.</p>
+<p>Hình dung mục lục ở cuối cuốn sách dày: muốn tìm chữ "event loop", bạn tra mục lục ra số trang rồi lật thẳng tới đó, thay vì đọc từ trang 1. Index là mục lục của bảng.</p>
+</div>
+
+<h2>Vì sao cần index</h2>
+<p>Lúc dữ liệu còn ít, mọi truy vấn đều nhanh và bạn không thấy vấn đề. Khi bảng có hàng triệu dòng, một trang lịch sử thanh toán mất vài giây chỉ vì database phải đọc từng dòng để tìm. Index sửa đúng chỗ đó, nhưng nó cũng có giá, nên phải biết đặt ở đâu và đo trước, đo sau.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Quét tuần tự (Seq Scan)</dt><dd>Đọc từng dòng của bảng để tìm dòng khớp.</dd>
+<dt>Index B-tree</dt><dd>Loại index mặc định: dữ liệu được sắp xếp sẵn dạng cây để tìm nhanh.</dd>
+<dt>Index Scan</dt><dd>Database dùng index để nhảy thẳng tới dòng cần.</dd>
+<dt><code>EXPLAIN ANALYZE</code></dt><dd>Chạy truy vấn và in ra database đã làm thế nào, mất bao lâu.</dd>
+<dt>Kế hoạch truy vấn</dt><dd>Các bước database chọn để trả lời một câu SQL.</dd>
+<dt>Chi phí của index</dt><dd>Tốn chỗ trên đĩa và làm <code>INSERT</code>/<code>UPDATE</code> chậm hơn, vì index cũng phải cập nhật.</dd>
+</dl>
+
+<h2>Index hoạt động thế nào</h2>
+<ol class="steps">
+<li><strong>Bạn tạo index</strong> trên một cột, ví dụ <code>CREATE INDEX ON payments (invoice_id);</code></li>
+<li><strong>Database xây cây</strong> chứa các giá trị đã sắp xếp, mỗi giá trị trỏ tới vị trí dòng trong bảng.</li>
+<li><strong>Khi truy vấn</strong> có <code>WHERE invoice_id = 12345</code>, database tra cây trong vài bước, rồi đọc đúng các dòng cần.</li>
+<li><strong>Mỗi lần ghi</strong>, database cập nhật cả bảng lẫn index.</li>
+</ol>
+
 <h2>Không có index thì database làm gì</h2>
 <p>Bạn hỏi "các khoản đóng của hoá đơn số 12345". Không có index trên <code>payments.invoice_id</code>, Postgres chỉ có một cách: đọc từng dòng của bảng <code>payments</code>, giữ những dòng khớp. Cách này gọi là quét tuần tự (sequential scan). Với 20.000 dòng thì vẫn nhanh. Với 20 triệu dòng thì mỗi lần mở trang lịch sử thanh toán mất vài giây.</p>
 <p>Index B-tree là một cây đã sắp xếp theo giá trị cột, mỗi lá trỏ tới vị trí dòng trong bảng. Tìm một giá trị chỉ cần đi từ gốc xuống lá qua vài tầng, kể cả khi bảng có hàng triệu dòng. Giống tra từ điển: bạn không đọc từ trang đầu, bạn mở khoảng giữa rồi chia đôi dần.</p>
@@ -25,7 +52,7 @@ Execution Time: 0.631 ms</code></pre>
 </table></div>
 <p><code>EXPLAIN</code> không có <code>ANALYZE</code> chỉ cho xem kế hoạch, không chạy. <code>EXPLAIN ANALYZE</code> chạy thật, nên với <code>UPDATE</code> hay <code>DELETE</code> phải bọc trong <code>BEGIN</code> và <code>ROLLBACK</code>.</p>
 
-<h2>Thêm index rồi đo lại</h2>
+<h2>Làm thử: thêm index rồi đo lại</h2>
 <pre><code>CREATE INDEX payments_invoice_id_idx ON payments (invoice_id);
 
 EXPLAIN ANALYZE
@@ -74,9 +101,26 @@ Execution Time: 0.029 ms</code></pre>
   <p><span class="wrong">"Khoá ngoại tự có index."</span><span class="fix">Chỉ PRIMARY KEY và UNIQUE có index tự động. Cột khoá ngoại phải tự tạo.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary><code>EXPLAIN ANALYZE</code> báo <code>Seq Scan on payments</code> với 20 triệu dòng cho câu <code>WHERE invoice_id = ...</code>. Nên làm gì?</summary><div><p>Tạo index trên <code>payments.invoice_id</code> rồi chạy lại <code>EXPLAIN ANALYZE</code> để so.</p></div></details>
+<details><summary>Vì sao không tạo index cho mọi cột cho chắc?</summary><div><p>Mỗi index tốn chỗ và làm mọi lần ghi chậm hơn. Chỉ tạo cho cột hay dùng để lọc, nối bảng hoặc sắp xếp.</p></div></details>
+<details><summary>Bảng chỉ có 200 dòng, có cần index không?</summary><div><p>Thường không: quét 200 dòng đã rất nhanh, database có khi còn chọn quét tuần tự dù có index.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Index là gì, đánh đổi những gì?</summary><div><p>Index là một cấu trúc dữ liệu phụ, phổ biến nhất là B-tree, sắp xếp giá trị của một hay nhiều cột và trỏ tới dòng tương ứng, nhờ đó tìm kiếm không phải quét cả bảng. Đổi lại, mỗi lệnh ghi phải cập nhật thêm index, và index tốn dung lượng. Vì vậy chỉ tạo index cho cột thực sự được tìm kiếm thường xuyên.</p></div></details>
   <details><summary>Bạn xử lý một truy vấn chậm thế nào?</summary><div><p>Tôi chạy EXPLAIN ANALYZE để xem kế hoạch thực tế: có quét tuần tự trên bảng lớn không, số dòng dự đoán có lệch xa số dòng thật không, bước nào chiếm nhiều thời gian nhất. Sau đó tôi thử thay đổi: thêm index phù hợp, viết lại truy vấn, hoặc cập nhật thống kê bằng ANALYZE. Rồi tôi đo lại để chắc thay đổi có tác dụng.</p></div></details>
   <details><summary>Index trên (a, b) dùng được cho những truy vấn nào?</summary><div><p>Dùng được cho truy vấn lọc theo a, hoặc theo a và b, và cho sắp xếp theo a rồi b. Thường không dùng được cho truy vấn chỉ lọc theo b, vì index sắp theo a trước, các giá trị b nằm rải rác khắp cây. Vì vậy cột hay được lọc bằng phép bằng nhất nên đặt đầu tiên.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Index là mục lục của bảng: tìm theo cột mà không đọc cả bảng.</li>
+<li>Đo bằng <code>EXPLAIN ANALYZE</code> trước và sau khi thêm index.</li>
+<li>Index có giá: tốn chỗ và làm ghi chậm hơn; đặt cho cột hay lọc, nối bảng, sắp xếp.</li>
+</ol>
 </div>

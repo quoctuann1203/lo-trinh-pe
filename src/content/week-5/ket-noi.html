@@ -1,3 +1,31 @@
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p>Để code Node nói chuyện được với PostgreSQL, bạn cần một <strong>driver</strong> (thư viện <code>pg</code>) và một <strong>pool</strong>: một nhóm kết nối mở sẵn, request nào cần thì mượn một kết nối, chạy SQL xong thì trả lại.</p>
+<p>Hình dung xe đạp công cộng ở trạm. Mua xe mới cho mỗi chuyến đi thì đắt và chậm; trạm có sẵn 10 chiếc, ai cần thì mượn, đi xong trả lại cho người sau. Pool là trạm xe đó, kết nối là chiếc xe.</p>
+</div>
+
+<h2>Vì sao không mở một kết nối mới cho mỗi request</h2>
+<p>Mỗi kết nối tới Postgres phải bắt tay qua mạng, xác thực, và Postgres tạo hẳn một tiến trình riêng cho nó. Việc đó tốn vài mili-giây và vài MB bộ nhớ mỗi lần. Mở mới cho từng request thì API chậm hẳn, và lúc đông người, Postgres hết chỗ nhận kết nối. Pool mở sẵn vài kết nối và dùng lại, nên nhanh và giới hạn được số kết nối.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Driver</dt><dd>Thư viện nói giao thức riêng của Postgres thay bạn. Với Node là <code>pg</code> (node-postgres).</dd>
+<dt>Kết nối (connection)</dt><dd>Một đường liên lạc đang mở giữa app và Postgres.</dd>
+<dt>Pool</dt><dd>Nhóm kết nối mở sẵn để dùng lại.</dd>
+<dt><code>pool.query</code></dt><dd>Mượn một kết nối, chạy một câu SQL, tự trả lại. Dùng cho hầu hết trường hợp.</dd>
+<dt><code>pool.connect</code></dt><dd>Mượn một kết nối để chạy nhiều câu trên cùng kết nối (cần cho transaction); phải tự <code>release()</code>.</dd>
+<dt>Chuỗi kết nối</dt><dd>URL chứa địa chỉ, cổng, tên database, tài khoản, ví dụ <code>postgres://user:pass@localhost:5432/db</code>.</dd>
+<dt><code>max</code></dt><dd>Số kết nối tối đa pool được mở.</dd>
+</dl>
+
+<h2>Pool hoạt động thế nào</h2>
+<ol class="steps">
+<li><strong>App khởi động</strong>, tạo một pool duy nhất từ chuỗi kết nối. Chưa mở kết nối nào.</li>
+<li><strong>Request cần SQL</strong> gọi <code>pool.query</code>. Pool đưa một kết nối đang rảnh, hoặc mở mới nếu chưa tới <code>max</code>.</li>
+<li><strong>Đủ <code>max</code> kết nối đều bận</strong> thì request xếp hàng chờ.</li>
+<li><strong>Chạy xong</strong>, kết nối được trả về pool cho request sau dùng lại.</li>
+</ol>
+
 <h2>Driver là gì</h2>
 <p>PostgreSQL không nói HTTP. Nó có giao thức riêng chạy trên TCP: bắt tay, xác thực, gửi câu lệnh, nhận từng dòng kết quả. Driver là thư viện nói giao thức đó thay bạn. Với Node, driver phổ biến nhất là <code>pg</code>, còn gọi là node-postgres. Các ORM như Drizzle hay Prisma rốt cuộc cũng đi qua một driver như vậy.</p>
 <pre><code>npm install pg
@@ -45,7 +73,7 @@ postgres://hoc:hoc@localhost:5432/books</code></pre>
 npx tsx --env-file=.env scripts/thu-pg.ts</code></pre>
 <p>Kiểm tra biến môi trường ngay lúc khởi động bằng zod như tuần 1. Thiếu <code>DATABASE_URL</code> thì app phải chết ngay với một thông báo rõ ràng, chứ không phải chạy được rồi mới báo lỗi ở request đầu tiên.</p>
 
-<h2>Bài đo: kết nối mới hay pool</h2>
+<h2>Làm thử: kết nối mới hay pool</h2>
 <p>Trong thư mục <code>sql-practice</code> của tuần 3, tạo một project Node nhỏ cạnh <code>compose.yaml</code>:</p>
 <pre><code>npm init -y
 npm install pg
@@ -93,9 +121,26 @@ await pool.end();</code></pre>
   <p><span class="wrong">"Không đặt connectionTimeoutMillis cũng được, mặc định chắc hợp lý."</span><span class="fix">Mặc định là 0, tức là chờ mãi. Khi pool cạn, request treo thay vì báo lỗi. Đặt vài giây.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Tạo <code>new Pool()</code> bên trong mỗi handler có vấn đề gì?</summary><div><p>Mỗi request tạo pool mới, nên mất hết lợi ích dùng lại và số kết nối tăng không giới hạn. Tạo một pool cho cả app.</p></div></details>
+<details><summary>Dùng <code>pool.connect()</code> mà quên <code>client.release()</code>. Chuyện gì xảy ra?</summary><div><p>Kết nối không được trả lại. Sau <code>max</code> lần, mọi request đứng chờ mãi.</p></div></details>
+<details><summary>Vì sao chuỗi kết nối để trong <code>.env</code>, không viết vào code?</summary><div><p>Nó chứa mật khẩu database, và khác nhau giữa máy bạn, máy test, server.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Connection pool là gì, vì sao cần?</summary><div><p>Pool là một nhóm kết nối tới database được mở sẵn và dùng lại. Mở kết nối tới PostgreSQL tốn thời gian vì phải bắt tay TCP, xác thực và tạo một tiến trình mới trên server, và số kết nối có giới hạn. Với pool, mỗi request mượn một kết nối đang mở, chạy xong thì trả lại. Khi pool bận hết, request xếp hàng thay vì mở thêm, nên database không bị quá tải.</p></div></details>
   <details><summary>Bạn chọn kích thước pool thế nào?</summary><div><p>Tôi bắt đầu nhỏ, khoảng 10, rồi đo. Database có số nhân CPU giới hạn, nên quá nhiều kết nối chạy cùng lúc làm từng truy vấn chậm đi. Tôi cũng nhân kích thước pool với số bản app đang chạy để chắc tổng không vượt max_connections của database, và chừa chỗ cho migration và công cụ quản trị. Nếu chạy serverless, tôi đặt một bộ gom kết nối như PgBouncer ở trước database.</p></div></details>
   <details><summary>Lỗi rò kết nối là gì, bạn phát hiện thế nào?</summary><div><p>Là khi code mượn kết nối từ pool mà không trả lại, thường do quên release ở nhánh lỗi. Pool cạn dần, rồi mọi request đứng chờ cho tới khi hết thời gian. Tôi phòng bằng cách luôn release trong finally, hoặc gói việc mượn và trả vào một hàm dùng chung. Để phát hiện, tôi theo dõi số kết nối đang được mượn và số request đang chờ của pool, và đặt connectionTimeoutMillis để lỗi hiện ra thay vì treo im lặng.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Driver <code>pg</code> nói chuyện với Postgres; một pool cho cả app.</li>
+<li><code>pool.query</code> cho câu đơn lẻ; <code>pool.connect</code> khi cần nhiều câu trên cùng kết nối, nhớ <code>release()</code>.</li>
+<li>Chuỗi kết nối nằm trong <code>.env</code>; <code>max</code> nhỏ thôi là đủ.</li>
+</ol>
 </div>

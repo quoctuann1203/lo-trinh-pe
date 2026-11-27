@@ -1,5 +1,31 @@
-<h2>Object <code>Error</code></h2>
-<p>Một <code>Error</code> có <code>message</code>, <code>name</code> và <code>stack</code> (các hàm đang chạy lúc lỗi được tạo, kèm file và dòng). Luôn ném <code>new Error(...)</code>. <code>throw 'hết hàng'</code> không có stack, đọc log sẽ không biết lỗi từ đâu.</p>
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Xử lý lỗi</strong> là quyết định trước: khi một việc hỏng thì lỗi đi đâu, ai bắt nó, và người dùng nhận được gì. Trong Node, lỗi không được ai bắt sẽ làm cả server sập.</p>
+<p>Hình dung bếp nấu hỏng một món. Đầu bếp phải <strong>báo lên</strong> (ném lỗi), quản lý quán <strong>quyết định</strong> (xin lỗi khách, làm lại, hoàn tiền). Tệ nhất là đầu bếp lặng lẽ bỏ món đó: khách ngồi chờ mãi mà không ai biết.</p>
+</div>
+
+<h2>Vì sao phải xử lý lỗi cẩn thận</h2>
+<p>Ở front-end, một lỗi thường chỉ làm hỏng một nút bấm trên máy một người. Ở server, một lỗi không ai bắt làm <strong>process thoát</strong>, và mọi người dùng đang kết nối cùng mất kết nối. Còn lỗi bị "nuốt" (catch rồi bỏ qua) thì tệ theo cách khác: request chạy tiếp với dữ liệu hỏng, hoặc client chờ mãi không có câu trả lời.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt><code>Error</code></dt><dd>Object mô tả lỗi, có <code>message</code> (nói gì sai), <code>name</code> (loại lỗi) và <code>stack</code> (lỗi xảy ra ở file nào, dòng nào).</dd>
+<dt>Ném lỗi (<code>throw</code>)</dt><dd>Dừng hàm hiện tại và đẩy lỗi ngược lên cho hàm đã gọi nó.</dd>
+<dt>Bắt lỗi (<code>try/catch</code>)</dt><dd>Bọc đoạn code có thể lỗi; lỗi xảy ra thì chạy vào nhánh <code>catch</code>.</dd>
+<dt>Reject</dt><dd>Promise thất bại. Bắt bằng <code>.catch()</code> hoặc <code>try/catch</code> quanh <code>await</code>.</dd>
+<dt>Process</dt><dd>Một chương trình Node đang chạy. Process thoát là server tắt.</dd>
+<dt><code>SIGTERM</code></dt><dd>Tín hiệu hệ điều hành gửi để nhờ process tự tắt, ví dụ khi deploy bản mới.</dd>
+</dl>
+
+<h2>Một lỗi đi đâu</h2>
+<ol class="steps">
+<li><strong>Lỗi được tạo</strong> bằng <code>throw new Error(...)</code>, hoặc một promise bị reject.</li>
+<li><strong>Lỗi đi ngược lên</strong>: qua từng hàm đã gọi (call stack), hoặc theo chuỗi promise.</li>
+<li><strong>Gặp chỗ bắt</strong> (<code>try/catch</code>, <code>.catch</code>, <code>app.onError</code>) thì dừng lại ở đó và được xử lý.</li>
+<li><strong>Không gặp chỗ bắt nào</strong> thì Node in lỗi ra và thoát process với mã 1.</li>
+</ol>
+<p>Luôn ném <code>new Error(...)</code>, đừng ném chuỗi như <code>throw 'hết hàng'</code>: chuỗi không có <code>stack</code>, đọc log sẽ không biết lỗi từ đâu.</p>
+
 <h2>Ba con đường</h2>
 <div class="tbl"><table>
 <thead><tr><th>Kiểu lỗi</th><th>Đi đâu</th><th>Ai bắt được</th></tr></thead>
@@ -56,16 +82,46 @@ process.on('SIGTERM', () =&gt; {
   });
   setTimeout(() =&gt; process.exit(1), 10_000).unref(); <span class="c">// quá 10 giây thì buộc thoát</span>
 });</code></pre>
+<h2>Làm thử: ba cách lỗi thoát khỏi tay bạn</h2>
+<p>Tạo file <code>loi.mjs</code>, chạy lần lượt từng đoạn (comment hai đoạn kia) bằng <code>node loi.mjs</code>, rồi xem terminal in gì và process có thoát không.</p>
+<pre><code>// Đoạn 1: try/catch bắt được lỗi đồng bộ
+try { JSON.parse('{'); } catch (e) { console.log('bắt được:', e.message); }
+
+// Đoạn 2: lỗi trong setTimeout, try/catch bên ngoài KHÔNG bắt được
+try { setTimeout(() =&gt; { throw new Error('trong timer'); }, 10); }
+catch { console.log('không bao giờ in'); }
+
+// Đoạn 3: promise reject không ai bắt
+Promise.reject(new Error('không ai catch'));</code></pre>
+<p><strong>Kết quả mong đợi:</strong> đoạn 1 in "bắt được" và chạy tiếp. Đoạn 2 và 3 in lỗi đỏ và process thoát với mã 1 (kiểm bằng <code>echo $?</code> ngay sau đó).</p>
+
 <h2>Bút đỏ: những câu nghe đúng mà sai</h2>
 <div class="redpen">
 <p><span class="wrong">"Bọc try/catch quanh mọi thứ cho chắc."</span><span class="fix">Sai. Catch mà không biết xử lý gì là giấu lỗi. Để lỗi nổi lên chỗ xử lý chung.</span></p>
 <p><span class="wrong">"catch (e) { console.log(e) } là đã xử lý lỗi."</span><span class="fix">Sai. Request vẫn chạy tiếp với dữ liệu hỏng, hoặc client chờ mãi không có response.</span></p>
 <p><span class="wrong">"Server sập là thảm hoạ, phải chặn bằng mọi giá."</span><span class="fix">Không hẳn. Với lỗi lập trình, sập rồi khởi động lại an toàn hơn chạy tiếp với trạng thái hỏng.</span></p>
 </div>
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary><code>try { loadStudent(''); } catch {}</code> mà <code>loadStudent</code> là hàm async bị lỗi. Lỗi có bị bắt không?</summary><div><p>Không, vì thiếu <code>await</code>. Hàm trả promise rồi thoát khỏi <code>try</code> ngay; promise reject sau đó thành <code>unhandledRejection</code>. Viết <code>await loadStudent('')</code>.</p></div></details>
+<details><summary>Người dùng gửi email sai định dạng. Đây là lỗi vận hành hay lỗi lập trình? Trả mã gì?</summary><div><p>Lỗi vận hành: đoán trước được dù code đúng. Trả 4xx (400 hoặc 422) kèm thông báo rõ ràng.</p></div></details>
+<details><summary>Vì sao không nên để process chạy tiếp sau <code>uncaughtException</code>?</summary><div><p>Lỗi có thể xảy ra giữa chừng một thao tác, trạng thái process đã hỏng. Ghi log rồi thoát, để trình quản lý khởi động lại bản sạch.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
 <details><summary><code>uncaughtException</code> và <code>unhandledRejection</code> khác nhau thế nào?</summary><div><p><code>uncaughtException</code> là lỗi đồng bộ đi hết call stack mà không gặp <code>try/catch</code>. <code>unhandledRejection</code> là promise reject mà không ai <code>.catch</code> hay <code>await</code>. Từ Node 15, cả hai mặc định làm process thoát.</p></div></details>
 <details><summary>Bạn viết gì trong <code>process.on('uncaughtException')</code>?</summary><div><p>Ghi log đầy đủ kèm stack, gửi lên hệ thống theo dõi lỗi nếu có, rồi thoát với mã khác 0. Không chạy tiếp, vì trạng thái process có thể đã hỏng. Khởi động lại là việc của trình quản lý process.</p></div></details>
 <details><summary>Lỗi vận hành và lỗi lập trình khác gì?</summary><div><p>Lỗi vận hành là tình huống đoán được dù code đúng, như email sai định dạng hay database timeout; xử lý bằng 4xx hoặc thử lại. Lỗi lập trình là bug, như đọc thuộc tính của <code>undefined</code>; sửa code, lúc chạy thì trả 500 và log.</p></div></details>
 <details><summary>Graceful shutdown là gì, vì sao cần?</summary><div><p>Khi nhận <code>SIGTERM</code>, server ngừng nhận kết nối mới, chờ request đang chạy xong, đóng tài nguyên, rồi thoát trong giới hạn thời gian. Nó tránh cắt ngang request khi deploy, nhất là với thanh toán.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Lỗi đi ngược lên tới chỗ bắt gần nhất; không ai bắt thì process thoát.</li>
+<li>Lỗi vận hành (input sai, timeout) trả 4xx; lỗi lập trình (bug) sửa code, lúc chạy trả 500 và ghi log.</li>
+<li>Khi nhận <code>SIGTERM</code>: ngừng nhận request mới, chờ request đang chạy xong, rồi mới thoát.</li>
+</ol>
 </div>

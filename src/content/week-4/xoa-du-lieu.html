@@ -1,4 +1,23 @@
-<h2>Xoá dòng cha thì dòng con ra sao</h2>
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p>Bài này trả lời hai câu: <strong>xoá một dòng cha thì các dòng con ra sao</strong> (xoá giáo viên thì lớp của họ đi đâu), và <strong>có nên xoá thật không</strong>, hay chỉ đánh dấu "đã lưu trữ" để giữ lịch sử. Kèm hai cột lưu vết <code>created_at</code>, <code>updated_at</code>.</p>
+<p>Hình dung kho lưu trữ hồ sơ của trường: học sinh nghỉ học không bị đốt hồ sơ, mà chuyển sang tủ "đã nghỉ". Cần tra lại học phí năm ngoái thì vẫn còn.</p>
+</div>
+
+<h2>Vì sao phải quyết định cách xoá</h2>
+<p>Dữ liệu trong công cụ thu tiền có liên kết chặt: hoá đơn thuộc học sinh, khoản đóng thuộc hoá đơn. Xoá sai cách thì hoặc database chặn lại (may mắn), hoặc kéo theo xoá mất lịch sử tiền bạc (tai hoạ). Quyết định trước cho từng khoá ngoại: chặn, xoá theo, hay đặt rỗng.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Dòng cha, dòng con</dt><dd>Dòng con có khoá ngoại trỏ tới dòng cha, ví dụ lớp (con) trỏ tới giáo viên (cha).</dd>
+<dt><code>ON DELETE RESTRICT</code></dt><dd>Mặc định an toàn: không cho xoá cha khi còn con.</dd>
+<dt><code>ON DELETE CASCADE</code></dt><dd>Xoá cha thì xoá luôn mọi con.</dd>
+<dt><code>ON DELETE SET NULL</code></dt><dd>Xoá cha thì đặt khoá ngoại ở con thành <code>NULL</code>.</dd>
+<dt>Xoá mềm</dt><dd>Không xoá dòng, chỉ ghi thời điểm lưu trữ vào cột như <code>archived_at</code>.</dd>
+<dt>Lưu vết</dt><dd>Cột <code>created_at</code>, <code>updated_at</code> ghi lúc tạo và lúc sửa gần nhất.</dd>
+</dl>
+
+<h2>Xoá hoạt động thế nào: dòng cha bị xoá thì dòng con ra sao</h2>
 <p>Thử xoá một giáo viên đang có lớp trong schema học phí:</p>
 <pre><code>DELETE FROM teachers WHERE id = 1;
 -- ERROR:  update or delete on table "teachers" violates foreign key constraint
@@ -80,7 +99,7 @@ DROP FUNCTION set_updated_at();</code></pre>
 <p><code>now()</code> trả về thời điểm bắt đầu transaction, không phải thời điểm chạy câu lệnh. Mọi dòng sửa trong cùng một transaction có cùng <code>updated_at</code>. Thường đó lại chính là điều bạn muốn.</p>
 <p>Với tiền bạc, mức cao hơn là không bao giờ sửa: <code>payments</code> chỉ được thêm, không <code>UPDATE</code>, không <code>DELETE</code>. Ghi nhầm thì thêm một bản ghi điều chỉnh. Bạn sẽ làm việc này khi đối soát ở tuần 14.</p>
 
-<h2>Bài luyện Thứ Năm, phần hai</h2>
+<h2>Làm thử: bài luyện Thứ Năm, phần hai</h2>
 <ol class="list">
   <li>Migration đổi <code>books.author_id</code> sang <code>ON DELETE SET NULL</code>. Thêm 2 tác giả, 2 cuốn sách, 2 đánh giá. Xoá một tác giả, rồi xoá một cuốn có đánh giá, và xem kết quả.</li>
   <li>Migration thêm <code>updated_at</code> và trigger cho <code>books</code>. <code>UPDATE</code> một cuốn, so <code>updated_at</code> với <code>created_at</code>.</li>
@@ -95,9 +114,26 @@ DROP FUNCTION set_updated_at();</code></pre>
   <p><span class="wrong">"updated_at để code ứng dụng tự đặt là được."</span><span class="fix">Code sẽ có chỗ quên, và lệnh UPDATE gõ tay trong psql thì chắc chắn quên. Trigger chạy với mọi đường ghi.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Khoản đóng trỏ tới hoá đơn. Nên dùng <code>CASCADE</code> khi xoá hoá đơn không?</summary><div><p>Không nên: xoá hoá đơn sẽ xoá mất lịch sử tiền đã nhận. Dùng mặc định chặn, và lưu trữ hoá đơn thay vì xoá.</p></div></details>
+<details><summary>Lớp đã kết thúc khoá học. Xoá hay xoá mềm?</summary><div><p>Xoá mềm: đặt <code>archived_at</code>, để học phí và điểm danh cũ vẫn tra được.</p></div></details>
+<details><summary>Có xoá mềm rồi, mọi câu <code>SELECT</code> danh sách lớp phải nhớ thêm gì?</summary><div><p>Lọc <code>WHERE archived_at IS NULL</code>, nếu không lớp đã lưu trữ vẫn hiện ra.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Bạn chọn ON DELETE CASCADE, SET NULL hay RESTRICT thế nào?</summary><div><p>Tôi hỏi: nếu dòng cha mất thì dòng con còn đúng không. Nếu dòng con vô nghĩa khi thiếu cha, như đánh giá của một cuốn sách, tôi dùng CASCADE. Nếu dòng con vẫn có nghĩa, tôi dùng SET NULL. Với dữ liệu quan trọng như hoá đơn và thanh toán, tôi để mặc định là chặn xoá, và dùng lưu trữ thay vì xoá.</p></div></details>
   <details><summary>Xoá mềm có nhược điểm gì?</summary><div><p>Mọi truy vấn phải nhớ lọc dòng đã xoá, quên một chỗ là lộ dữ liệu cũ. Ràng buộc UNIQUE phải chuyển sang index một phần. Bảng lớn dần vì không bao giờ xoá thật. Và nó không đáp ứng được yêu cầu xoá dữ liệu cá nhân. Một cách khác là chuyển dòng sang bảng lưu trữ riêng, để bảng chính chỉ chứa dữ liệu đang dùng.</p></div></details>
   <details><summary>Làm sao để updated_at luôn đúng?</summary><div><p>Dùng trigger BEFORE UPDATE trong database đặt NEW.updated_at bằng now(). Như vậy nó đúng với mọi đường ghi dữ liệu, kể cả câu lệnh gõ tay hay một service khác, không chỉ với code ứng dụng của mình.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Mỗi khoá ngoại chọn một hành vi khi xoá cha: chặn (mặc định), <code>CASCADE</code>, hay <code>SET NULL</code>.</li>
+<li>Dữ liệu tiền bạc thì lưu trữ (xoá mềm), không xoá thật.</li>
+<li>Bảng nào cũng nên có <code>created_at</code> và <code>updated_at</code>.</li>
+</ol>
 </div>

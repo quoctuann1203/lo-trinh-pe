@@ -1,4 +1,21 @@
-<h2>Bước 1: hocphi nói chuyện với database</h2>
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p>Bài này là bài tổng hợp của tuần 5: cho ứng dụng Next.js <code>hocphi</code> đọc ghi database thật. Bạn làm API danh sách hoá đơn trong tháng, chức năng ghi khoản đóng an toàn khi nhiều người cùng ghi, và bộ test chứng minh nó đúng.</p>
+<p>Hình dung lắp điện cho căn nhà đã xây xong ở tuần 4: đi dây (kết nối), lắp công tắc (các hàm đọc ghi), rồi bật thử từng phòng (test), kể cả bật hai công tắc cùng lúc.</p>
+</div>
+
+<h2>Vì sao làm bài tổng hợp này</h2>
+<p>Mỗi bài trước dạy một mảnh: pool, tham số, store, lỗi database, transaction, khoá dòng, test. Ghép vào một sản phẩm thật mới lộ ra chỗ các mảnh chạm nhau, ví dụ transaction phải chạy cùng kết nối với hàm store, hay test cùng lúc 10 request mới thấy lỗi đồng thời.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt><code>server-only</code></dt><dd>Gói đánh dấu file chỉ được chạy trên server, để code database không lọt vào trình duyệt.</dd>
+<dt><code>.env.local</code></dt><dd>File biến môi trường của Next.js trên máy bạn, không commit.</dd>
+<dt>Route Handler</dt><dd>File <code>route.ts</code> trong <code>src/app/api/...</code>, export hàm <code>GET</code>, <code>POST</code>… để Next.js trả lời request API. Bài này viết API của hocphi bằng cách đó.</dd>
+<dt>Pool dùng chung</dt><dd>Một pool cho cả app Next.js, giữ qua các lần tải lại code khi dev.</dd>
+</dl>
+
+<h2>Làm thử, bước 1: hocphi nói chuyện với database</h2>
 <p>Từ tuần 4, database của hocphi chạy ở cổng 5433 và schema nằm trong <code>db/migrations</code>. Giờ đến lượt code Next.js đọc ghi nó.</p>
 <pre><code>npm install pg server-only
 npm install -D @types/pg</code></pre>
@@ -406,9 +423,26 @@ if (!key.success) return problem(400, 'IDEMPOTENCY_KEY_REQUIRED', 'Cần header 
   <p><span class="wrong">"Mỗi lần lưu file, next dev tạo pool mới cũng không sao."</span><span class="fix">Pool cũ vẫn giữ kết nối. Sau vài chục lần lưu, Postgres báo too many clients. Giữ pool trên globalThis khi chạy dev.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Vì sao file tạo pool cần <code>import 'server-only'</code>?</summary><div><p>Để nếu lỡ import nó từ component chạy ở trình duyệt thì build báo lỗi, thay vì đưa chuỗi kết nối database ra trình duyệt.</p></div></details>
+<details><summary>Test gửi 10 request ghi khoản đóng cùng lúc để kiểm tra điều gì?</summary><div><p>Rằng tổng nhận không vượt số tiền hoá đơn khi nhiều request chen nhau, tức khoá dòng hoạt động đúng.</p></div></details>
+<details><summary>Bấm nút ghi khoản đóng hai lần, vì sao không được thành hai khoản?</summary><div><p>Vì đó là cùng một lần đóng tiền; mã chống bấm hai lần giúp server nhận ra và trả lại kết quả lần đầu.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Kể cách bạn làm một endpoint ghi nhận thanh toán.</summary><div><p>Endpoint nhận id hoá đơn, số tiền và header Idempotency-Key. Sau khi validate, mọi thứ chạy trong một transaction: khoá dòng hoá đơn bằng SELECT FOR UPDATE, đồng thời kiểm tra hoá đơn thuộc về giáo viên đang đăng nhập; kiểm tra mã idempotency đã được dùng chưa; tính số còn thiếu; nếu số tiền không vượt quá thì ghi. Có ba lớp bảo vệ: khoá dòng chặn hai người ghi cùng lúc, idempotency key chặn một request bị gửi hai lần, và ràng buộc UNIQUE trên mã là lưới an toàn cuối cùng. Tôi có test gửi 10 request cùng lúc, và đã thấy test đó đỏ khi bỏ khoá.</p></div></details>
   <details><summary>Idempotency là gì? Vì sao API thanh toán cần nó?</summary><div><p>Một thao tác idempotent cho cùng kết quả dù được gọi một lần hay nhiều lần. POST tạo thanh toán vốn không như vậy: gửi hai lần là hai khoản. Nhưng client luôn có lý do để gửi lại, như hết thời gian chờ mà không biết server đã ghi hay chưa. Client gửi kèm một mã duy nhất cho mỗi ý định thanh toán. Server lưu mã đó, nếu gặp lại thì trả về kết quả cũ thay vì ghi mới. Nhờ vậy client có thể thử lại an toàn.</p></div></details>
   <details><summary>Một người dùng có xem được dữ liệu của người khác không? Bạn chặn ở đâu?</summary><div><p>Tôi chặn ngay trong câu truy vấn: mọi câu đọc ghi hoá đơn đều nối tới lớp học và lọc theo teacher_id của người đang đăng nhập. Hoá đơn của người khác vì vậy giống hệt hoá đơn không tồn tại, và tôi trả 404 để không lộ là nó có thật. Tôi có test tạo hai giáo viên và kiểm tra giáo viên này không ghi được vào hoá đơn của giáo viên kia.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>hocphi nối Postgres qua một pool dùng chung, đánh dấu <code>server-only</code>, chuỗi kết nối trong <code>.env.local</code>.</li>
+<li>Ghi khoản đóng trong transaction có khoá dòng; bấm hai lần không thành hai khoản.</li>
+<li>Test trên database test riêng, kể cả 10 request cùng lúc.</li>
+</ol>
 </div>

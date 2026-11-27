@@ -1,3 +1,31 @@
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Kiểm tra migration</strong> là chạy tự động toàn bộ migration trên một database trống: chạy lên, chạy xuống, chạy lên lại, rồi so schema thu được với <code>db/schema.sql</code> trong repo. Một script làm việc đó, bạn chạy bằng <code>npm run db:check</code> trước mỗi lần commit.</p>
+<p>Hình dung tập dượt thoát hiểm: không đợi cháy thật mới biết cửa thoát có mở được không. Script này là buổi tập dượt cho migration, trước khi nó chạy trên dữ liệu thật của giáo viên.</p>
+</div>
+
+<h2>Vì sao migration chạy được trên máy bạn vẫn có thể sai</h2>
+<p>Database trên máy bạn đã đi qua mọi bước bạn từng làm, kể cả những lệnh gõ tay trong psql mà bạn quên mất. Database của đồng đội, của CI, của server thì không. Phần down hiếm khi được chạy nên hay sai mà không ai biết, cho tới ngày cần hoàn tác gấp.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Database trống</dt><dd>Database vừa tạo, chưa có bảng nào. Giống hệt lúc đồng đội mới clone repo.</dd>
+<dt>Up / down</dt><dd>Phần làm và phần hoàn tác của một migration.</dd>
+<dt>Vòng up-down-up</dt><dd>Chạy hết lên, hoàn tác từng bước xuống, rồi chạy lên lại; phải ra cùng một schema.</dd>
+<dt>Schema dump</dt><dd>Bản in toàn bộ cấu trúc database ra file SQL, để so sánh.</dd>
+<dt><code>diff</code></dt><dd>Lệnh so hai file và in ra chỗ khác nhau.</dd>
+<dt><code>set -euo pipefail</code></dt><dd>Dòng đầu script bash: gặp lỗi đầu tiên là dừng, không chạy tiếp như không có gì.</dd>
+</dl>
+
+<h2>Script kiểm tra hoạt động thế nào</h2>
+<ol class="steps">
+<li><strong>Xoá rồi tạo lại database riêng</strong> <code>hocphi_check</code> (<code>dm drop</code>), để nó trống hoàn toàn và không đụng dữ liệu dev.</li>
+<li><strong>Chạy mọi migration lên</strong> rồi so schema với <code>db/schema.sql</code>. Lỗi ở đây nghĩa là migration dựa vào thứ không có trong repo, hoặc bạn quên cập nhật file schema.</li>
+<li><strong>Chạy xuống từng bước</strong> tới hết. Lỗi ở đây nghĩa là phần down sai.</li>
+<li><strong>Chạy lên lại</strong> rồi so schema lần nữa. Lỗi ở đây nghĩa là down thiếu bước hoặc không trả về đúng trạng thái.</li>
+<li><strong>In dòng kết quả cuối</strong> nếu mọi bước đều qua; gặp lỗi đầu tiên là dừng.</li>
+</ol>
+
 <h2>Migration sai theo những cách nào</h2>
 <p>Migration của bạn chạy được trên máy bạn, vì database của bạn đã đi qua đúng các bước bạn đã làm, kể cả những lệnh gõ tay trong psql mà bạn quên mất. Database của đồng đội, của CI, của server thì không có các bước đó. Những lỗi hay gặp nhất:</p>
 <div class="tbl"><table>
@@ -50,7 +78,7 @@ echo "OK: $count migration chạy lên, xuống, lên lại đều khớp"</code
 <p>Chạy bằng <code>npm run db:check</code>. Lần đầu sẽ thấy nhiều dòng của Docker và dbmate, dòng cuối phải là:</p>
 <pre><code>OK: 5 migration chạy lên, xuống, lên lại đều khớp</code></pre>
 
-<h2>Cố tình làm hỏng để tin script</h2>
+<h2>Làm thử: cố tình làm hỏng để tin script</h2>
 <p>Một bài kiểm tra chưa từng báo lỗi thì chưa chắc đã kiểm tra được gì. Giống như ở tuần 2 bạn làm test thất bại trước khi tin nó. Thử ba cách làm hỏng, mỗi lần xong thì sửa lại:</p>
 <ol class="list">
   <li>Xoá dòng <code>DROP TABLE parents;</code> trong phần down của migration tách phụ huynh. Script dừng ở bước 4: <code>Error: pq: relation "parents" already exists (42P07)</code>.</li>
@@ -93,9 +121,26 @@ echo "OK: $count migration chạy lên, xuống, lên lại đều khớp"</code
   <p><span class="wrong">"Script kiểm tra không báo lỗi lần nào, chứng tỏ migration tốt."</span><span class="fix">Hoặc script không kiểm tra gì. Làm hỏng có chủ đích một lần để thấy nó báo lỗi.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Migration có phần down thiếu <code>DROP TABLE</code>. Bước nào của script bắt được?</summary><div><p>Bước chạy lên lại: bảng vẫn còn từ lần trước nên lệnh <code>CREATE TABLE</code> báo lỗi đã tồn tại.</p></div></details>
+<details><summary>Bạn sửa migration nhưng quên commit <code>db/schema.sql</code>. Script báo gì?</summary><div><p>Bước so schema in ra chỗ khác nhau giữa bản dump mới và file trong repo.</p></div></details>
+<details><summary>Script qua hết. Đã chắc migration an toàn trên server chưa?</summary><div><p>Chưa. Script không bắt được khoá bảng lâu hay dữ liệu thật vi phạm ràng buộc mới. Vẫn cần đọc lại theo danh sách review.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Bạn kiểm tra migration trước khi gộp thế nào?</summary><div><p>Tự động, tôi có một script chạy trên database trống: chạy mọi migration, so schema với file đã commit, rollback hết, chạy lại, rồi so lần nữa. Script đó bắt được migration dựa vào trạng thái không có trong repo và down viết thiếu. Bằng tay, tôi review theo danh sách: có lệnh nào khoá bảng lâu không, có lock_timeout chưa, code cũ có chạy được với schema mới không, backfill có câu kiểm tra chưa. Với migration lớn, tôi chạy thử trên bản sao dữ liệu thật để đo thời gian.</p></div></details>
   <details><summary>Vì sao phải kiểm tra migration trên database trống?</summary><div><p>Vì database trên máy lập trình viên có lịch sử riêng: lệnh gõ tay, migration đã sửa sau khi chạy, nhánh khác đã chạy rồi bỏ. Migration chạy được ở đó chưa chắc chạy được ở CI hay trên máy người mới. Database trống là trạng thái duy nhất mà mọi người đều có giống nhau.</p></div></details>
   <details><summary>Có những rủi ro nào mà kiểm tra trên database trống không phát hiện được?</summary><div><p>Thời gian chạy và khoá, vì bảng trống thì lệnh nào cũng nhanh. Dữ liệu cũ vi phạm ràng buộc mới. Backfill nối sai điều kiện. Deadlock với transaction của ứng dụng. Những rủi ro này cần review, chạy thử trên bản sao dữ liệu có kích thước thật, và dùng lock_timeout để migration tự huỷ thay vì chặn người dùng.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Kiểm migration trên database trống: up, down, up lại, rồi so schema với repo.</li>
+<li>Cố tình làm hỏng một lần để chắc script bắt được lỗi.</li>
+<li>Script không thay được việc đọc lại: khoá bảng và dữ liệu thật vẫn phải tự xét.</li>
+</ol>
 </div>

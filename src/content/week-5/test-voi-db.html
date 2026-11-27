@@ -1,3 +1,9 @@
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Test với database thật</strong> là chạy bộ test API trên một database Postgres riêng chỉ dành cho test, được dựng lại từ migration và dọn sạch trước mỗi test. Test kiểm tra đúng SQL, ràng buộc và mã lỗi mà server thật sẽ gặp.</p>
+<p>Hình dung tập lái trên xe thật trong sân tập, không phải trên trò chơi điện tử. Sân tập riêng nên đâm vào cọc cũng không hại ai, và mỗi lượt tập bắt đầu với sân sạch.</p>
+</div>
+
 <h2>Bước 0: books-api có database riêng</h2>
 <p>API sách là một repo riêng, nên nó có Postgres riêng, giống cách bạn làm cho hocphi ở tuần 4. Cổng ngoài là 5434, để chạy song song được với <code>sql-practice</code> (5432) và <code>hocphi</code> (5433). Thêm <code>compose.yaml</code> ở gốc <code>books-api</code>:</p>
 <pre><code>services:
@@ -56,6 +62,23 @@ DROP TABLE books;</code></pre>
 <h2>Vì sao không giữ kho trong bộ nhớ cho test</h2>
 <p>Kho <code>Map</code> của tuần 1 chạy rất nhanh, nhưng nó không có những thứ bạn đang dựa vào. Nó không có UNIQUE, nên test "ISBN trùng trả 409" chỉ kiểm tra được đoạn code tự kiểm tra của bạn. Nó không có <code>CHECK</code>, không có khoá ngoại, không có transaction. Và nó không bắt được một tên cột viết sai trong SQL, vì với nó chẳng có SQL nào.</p>
 <p>Code càng dựa vào database để giữ dữ liệu đúng, test càng phải chạy trên database thật. Với API sách, gần như mọi thứ đều đi qua database, nên toàn bộ bộ test chạy trên PostgreSQL.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Database test</dt><dd>Database riêng chỉ để chạy test, ví dụ <code>books_test</code>, không đụng dữ liệu dev.</dd>
+<dt><code>globalSetup</code></dt><dd>File Vitest chạy một lần trước cả bộ test, dùng để dựng database test từ migration.</dd>
+<dt><code>TRUNCATE</code></dt><dd>Xoá sạch mọi dòng của bảng rất nhanh; dùng để dọn trước mỗi test.</dd>
+<dt><code>RESTART IDENTITY</code></dt><dd>Đặt lại bộ đếm id về 1 khi <code>TRUNCATE</code>, để id trong test dễ đoán.</dd>
+<dt>Chạy tuần tự</dt><dd>Test dùng chung một database thì không chạy song song, để không dọn mất dữ liệu của nhau.</dd>
+</dl>
+
+<h2>Bộ test chạy trên database thế nào</h2>
+<ol class="steps">
+<li><strong>Trước cả bộ test</strong>: xoá và tạo lại database test, chạy mọi migration.</li>
+<li><strong>Trước mỗi test</strong>: <code>TRUNCATE</code> các bảng để bắt đầu sạch.</li>
+<li><strong>Trong test</strong>: tạo đúng dữ liệu cần, gửi request bằng <code>app.request()</code>, kiểm tra response và dữ liệu trong bảng.</li>
+<li><strong>Sau cả bộ test</strong>: đóng pool để process thoát.</li>
+</ol>
 
 <h2>Database test riêng, dựng lại từ migration</h2>
 <p>Đừng chạy test trên database <code>books</code> bạn đang dùng để phát triển. Có ba lý do:</p>
@@ -126,7 +149,7 @@ beforeEach(() =&gt; resetDb());</code></pre>
 <p><code>TRUNCATE</code> nhanh hơn <code>DELETE</code> vì nó không xoá từng dòng. <code>RESTART IDENTITY</code> đưa bộ đếm id về 1, để id không phụ thuộc vào thứ tự chạy test. <code>CASCADE</code> xoá luôn các bảng trỏ tới <code>books</code>, khi sau này có thêm bảng con.</p>
 <p>Có một cách khác hay được nhắc: mở transaction trước mỗi test, rollback sau test. Cách đó chỉ chạy được khi test và code dùng chung đúng một kết nối. Code của bạn mượn kết nối từ pool, mỗi câu có thể đi một kết nối khác. Hôm Thứ Bảy, code còn tự mở transaction riêng. Vì vậy dùng <code>TRUNCATE</code>: đơn giản, và chỉ tốn vài mili-giây với bảng nhỏ.</p>
 
-<h2>Chạy, rồi cố tình làm hỏng</h2>
+<h2>Làm thử: chạy, rồi cố tình làm hỏng</h2>
 <pre><code>npm test</code></pre>
 <p>Lần đầu bạn sẽ thấy dbmate in ra vài dòng, rồi test chạy. Test nào đỏ thì thường do một trong ba lý do:</p>
 <ul>
@@ -146,9 +169,26 @@ beforeEach(() =&gt; resetDb());</code></pre>
   <p><span class="wrong">"Không có ORDER BY thì database trả theo thứ tự chèn."</span><span class="fix">Không có gì đảm bảo điều đó. Sau khi sửa hay xoá dòng, thứ tự có thể đổi. Muốn thứ tự nào thì viết ORDER BY.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Vì sao không chạy test trên database dev bạn đang dùng?</summary><div><p>Test dọn sạch bảng trước mỗi lần chạy, sẽ xoá mất dữ liệu bạn đang dùng để phát triển.</p></div></details>
+<details><summary>Test 1 tạo sách, test 2 mong đợi danh sách có 1 cuốn. Chạy riêng test 2 thì hỏng. Vì sao?</summary><div><p>Test 2 phụ thuộc dữ liệu của test 1. Mỗi test phải tự tạo dữ liệu nó cần, vì bảng được dọn trước mỗi test.</p></div></details>
+<details><summary>Test với Map trong bộ nhớ qua hết, vì sao vẫn nên test với Postgres?</summary><div><p>Map không có ràng buộc <code>UNIQUE</code>, kiểu dữ liệu hay mã lỗi Postgres; lỗi SQL chỉ lộ ra khi chạy trên database thật.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Bạn test code đọc ghi database thế nào?</summary><div><p>Tôi chạy integration test trên PostgreSQL thật, trong một database test riêng được xoá và dựng lại từ migration mỗi lần chạy test. Nhờ vậy test kiểm tra cả migration lẫn các ràng buộc như UNIQUE. Trước mỗi test tôi TRUNCATE các bảng, và các file test chạy lần lượt để không xoá dữ liệu của nhau. Logic thuần như tính học phí thì vẫn có unit test riêng, không cần database.</p></div></details>
   <details><summary>Vì sao không mock database trong test?</summary><div><p>Vì phần dễ sai nhất chính là chỗ nói chuyện với database: câu SQL, tên cột, kiểu dữ liệu trả về, ràng buộc. Mock thay đúng phần đó bằng thứ tôi tự viết, nên test chỉ xác nhận lại giả định của tôi. Mock hợp với những thứ chậm hoặc nằm ngoài tầm kiểm soát, như API thanh toán bên thứ ba. Database thì chạy được trên máy và trong CI bằng Docker, nên tôi dùng bản thật.</p></div></details>
   <details><summary>Làm sao để test dùng database không ảnh hưởng nhau?</summary><div><p>Mỗi test bắt đầu từ trạng thái sạch: tôi TRUNCATE bảng với RESTART IDENTITY trong beforeEach, và mỗi test tự tạo dữ liệu nó cần. Các file test chạy tuần tự vì chúng dùng chung database. Nếu bộ test lớn và chậm, có thể cho mỗi worker một database riêng để chạy song song lại.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Test chạy trên database riêng, dựng lại từ migration trước cả bộ test.</li>
+<li><code>TRUNCATE</code> trước mỗi test; mỗi test tự tạo dữ liệu nó cần.</li>
+<li>Cố tình làm hỏng SQL để chắc test bắt được lỗi; nhớ đóng pool khi xong.</li>
+</ol>
 </div>

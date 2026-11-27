@@ -1,5 +1,48 @@
-<h2>Trước Promise: callback</h2>
-<p>Node ban đầu dùng callback kiểu <code>(err, data)</code>. Lồng nhau vài tầng là thành "callback hell": khó đọc, phải kiểm tra <code>err</code> ở từng tầng, và không dùng được <code>try/catch</code> vì lỗi xảy ra ở lượt event loop khác.</p>
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Promise</strong> là một object đại diện cho kết quả <em>sẽ có trong tương lai</em> của một việc phải chờ, như đọc file hay gọi API. <strong>async/await</strong> là cách viết để chờ promise mà code vẫn đọc từ trên xuống như bình thường.</p>
+<p>Hình dung bạn gọi trà sữa và nhận một <strong>tờ phiếu có số</strong>. Tờ phiếu chưa phải ly trà, nhưng hứa rằng lát nữa bạn sẽ nhận được trà (thành công) hoặc được báo hết hàng (thất bại). Promise chính là tờ phiếu đó; <code>await</code> là đứng chờ gọi số.</p>
+</div>
+
+<h2>Vì sao cần Promise</h2>
+<p>Ở bài event loop, bạn thấy Node không đứng chờ I/O mà giao việc đi rồi chạy tiếp. Vậy khi việc xong, làm sao code của bạn nhận được kết quả? Ngày xưa Node dùng <strong>callback</strong>: đưa một hàm cho người ta gọi lại khi xong.</p>
+<pre><code>readFile('a.txt', (err, a) =&gt; {
+  if (err) return handle(err);
+  readFile('b.txt', (err, b) =&gt; {
+    if (err) return handle(err);
+    save(a + b, (err) =&gt; {
+      if (err) return handle(err);
+      console.log('xong');
+    });
+  });
+});</code></pre>
+<p>Ba bước đã lồng ba tầng, mỗi tầng tự kiểm <code>err</code>, và không dùng được <code>try/catch</code>. Người ta gọi kiểu này là "callback hell". Promise và async/await viết lại đúng việc đó thành:</p>
+<pre><code>try {
+  const a = await readFile('a.txt', 'utf8');
+  const b = await readFile('b.txt', 'utf8');
+  await save(a + b);
+  console.log('xong');
+} catch (err) { handle(err); }</code></pre>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Bất đồng bộ (async)</dt><dd>Việc bắt đầu bây giờ nhưng xong lúc khác, như đọc file hay gọi API.</dd>
+<dt>Callback</dt><dd>Hàm đưa cho người khác gọi lại khi việc xong. Cách cũ trước khi có promise.</dd>
+<dt>pending</dt><dd>Promise đang chờ, chưa có kết quả.</dd>
+<dt>fulfilled</dt><dd>Promise thành công, kèm một giá trị.</dd>
+<dt>rejected</dt><dd>Promise thất bại, kèm một lý do (thường là <code>Error</code>).</dd>
+<dt><code>await</code></dt><dd>Tạm dừng hàm hiện tại cho tới khi promise xong, rồi lấy giá trị ra. Chỉ dùng trong hàm <code>async</code> hoặc ở cấp cao nhất của ES module.</dd>
+<dt><code>async function</code></dt><dd>Hàm luôn trả về một Promise. Bên trong được dùng <code>await</code>.</dd>
+</dl>
+
+<h2>Promise hoạt động thế nào</h2>
+<ol class="steps">
+<li><strong>Tạo:</strong> gọi một hàm bất đồng bộ (<code>readFile</code>, <code>fetch</code>) trả về ngay một promise ở trạng thái pending. Việc thật đã bắt đầu chạy ngầm.</li>
+<li><strong>Chờ:</strong> bạn gắn xử lý bằng <code>.then</code> hoặc <code>await</code>. Luồng JS không đứng chờ, nó đi làm việc khác.</li>
+<li><strong>Xong:</strong> việc thành công thì promise chuyển sang fulfilled; thất bại thì sang rejected. Chỉ chuyển <strong>một lần duy nhất</strong>.</li>
+<li><strong>Chạy tiếp:</strong> event loop cho code sau <code>await</code> (hoặc trong <code>.then</code>) chạy dưới dạng microtask. Nếu rejected, <code>await</code> ném lỗi ngay tại dòng đó.</li>
+</ol>
+
 <h2>Ba trạng thái của một Promise</h2>
 <div class="tbl"><table>
 <thead><tr><th>Trạng thái</th><th>Nghĩa</th></tr></thead>
@@ -30,7 +73,8 @@ console.log(v); <span class="c">// "catch: ở bước 3: 2"</span></code></pre>
 <li><code>await p</code> tạm dừng <strong>hàm này</strong> cho đến khi <code>p</code> xong. Phần code sau <code>await</code> thành một microtask. Luồng JS không bị chặn.</li>
 <li>Nếu <code>p</code> bị reject, <code>await p</code> ném lỗi ngay tại dòng đó, nên <code>try/catch</code> dùng được.</li>
 </ul>
-<h2>Tuần tự và song song</h2>
+<h2>Làm thử: tuần tự và song song</h2>
+<p>Chép đoạn dưới vào file <code>time.mts</code>, bọc mỗi cách bằng <code>console.time('tuan-tu')</code> / <code>console.timeEnd('tuan-tu')</code>, chạy <code>node time.mts</code> và so thời gian.</p>
 <pre><code>const sleep = (ms: number, v: string) =&gt; new Promise&lt;string&gt;((r) =&gt; setTimeout(() =&gt; r(v), ms));
 
 <span class="c">// Tuần tự: cái sau chờ cái trước. Khoảng 300 ms</span>
@@ -67,10 +111,27 @@ async function b() {
 <p><span class="wrong">"Thêm async trước hàm là hàm chạy nhanh hơn."</span><span class="fix">Sai. Nó chỉ đổi kiểu trả về thành Promise.</span></p>
 <p><span class="wrong">"Promise.all chạy các việc song song."</span><span class="fix">Chính xác hơn: các việc đã bắt đầu từ lúc gọi hàm. Promise.all chỉ chờ chúng cùng lúc.</span></p>
 </div>
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Hàm <code>async function f() { return 5; }</code>. <code>f()</code> trả về gì?</summary><div><p>Một Promise fulfilled với giá trị 5, không phải số 5. Muốn lấy 5 thì <code>await f()</code>.</p></div></details>
+<details><summary>Ba lời gọi API độc lập, mỗi cái 1 giây. Viết <code>await</code> lần lượt mất bao lâu? Dùng <code>Promise.all</code> mất bao lâu?</summary><div><p>Lần lượt khoảng 3 giây. <code>Promise.all</code> khoảng 1 giây, vì cả ba cùng chờ.</p></div></details>
+<details><summary>Gửi nhắc học phí cho 30 phụ huynh, vài người có email sai. Dùng <code>Promise.all</code> hay <code>Promise.allSettled</code>?</summary><div><p><code>allSettled</code>: muốn biết từng người gửi được hay không, không muốn một email sai làm hỏng cả đợt.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
 <details><summary>Promise là gì? Có mấy trạng thái?</summary><div><p>Object đại diện cho kết quả của một việc bất đồng bộ, có ba trạng thái pending, fulfilled, rejected, và chỉ chuyển trạng thái một lần. Gắn xử lý bằng <code>.then</code>/<code>.catch</code> hoặc <code>await</code>.</p></div></details>
 <details><summary>async/await khác Promise thế nào?</summary><div><p>Không phải hai cơ chế khác nhau. async/await là cú pháp xây trên Promise: hàm async trả Promise, <code>await</code> chờ một Promise. Lợi ích là code trông như tuần tự và dùng được <code>try/catch</code>.</p></div></details>
 <details><summary>Cần gọi 3 API độc lập để dựng trang tổng quan. Bạn viết thế nào?</summary><div><p>Gọi song song bằng <code>Promise.all</code> để tổng thời gian bằng cái chậm nhất. Nếu trang vẫn nên hiện khi một API lỗi thì dùng <code>Promise.allSettled</code> và hiện phần có dữ liệu. Đặt timeout cho từng lời gọi.</p></div></details>
 <details><summary>Đoạn <code>arr.forEach(async x =&gt; await save(x))</code> có vấn đề gì?</summary><div><p><code>forEach</code> không chờ promise: code phía sau chạy trước khi lưu xong, và lỗi của <code>save</code> thành lỗi không ai xử lý, làm process sập. Sửa bằng <code>for...of</code> + <code>await</code> hoặc <code>await Promise.all(arr.map(save))</code>.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Promise là lời hứa về kết quả sau này: pending rồi fulfilled hoặc rejected, chỉ một lần.</li>
+<li><code>async</code>/<code>await</code> là cách viết trên Promise: code đọc từ trên xuống, bắt lỗi bằng <code>try/catch</code>.</li>
+<li>Việc độc lập thì chạy song song bằng <code>Promise.all</code>; đừng dùng <code>forEach</code> với hàm async.</li>
+</ol>
 </div>

@@ -1,3 +1,29 @@
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Truy vấn có tham số</strong> là gửi câu SQL và dữ liệu <em>tách riêng</em> cho database: câu SQL có chỗ trống <code>$1</code>, <code>$2</code>, còn giá trị đi kèm trong một mảng. Database không bao giờ nhầm dữ liệu người dùng với câu lệnh, nên <strong>SQL injection</strong> không xảy ra được.</p>
+<p>Hình dung tờ đơn có ô trống "Họ tên: ____". Ai điền gì vào ô thì đó chỉ là họ tên, dù họ viết "và xoá hết hồ sơ". Ghép chuỗi thì như để người lạ tự viết thêm dòng vào chính tờ đơn.</p>
+</div>
+
+<h2>Vì sao ghép chuỗi để tạo SQL là nguy hiểm</h2>
+<p>SQL injection nằm trong nhóm lỗ hổng phổ biến và gây hại nhất của web. Một dấu nháy trong ô tìm kiếm là đủ để người lạ đọc dữ liệu của mọi giáo viên, hoặc xoá bảng. Cách chặn lại rất rẻ: luôn dùng tham số. Bài này cho bạn tự tay tấn công một bảng thử để thấy rõ vì sao.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>SQL injection</dt><dd>Người dùng chèn câu lệnh SQL của họ qua dữ liệu nhập, vì code ghép thẳng dữ liệu vào chuỗi SQL.</dd>
+<dt>Tham số (<code>$1</code>, <code>$2</code>)</dt><dd>Chỗ trống trong câu SQL; giá trị được gửi riêng và luôn được hiểu là dữ liệu.</dd>
+<dt>Ghép chuỗi</dt><dd>Nối dữ liệu vào chuỗi SQL bằng <code>+</code> hay template literal <code>`${...}`</code>.</dd>
+<dt>Identifier</dt><dd>Tên bảng, tên cột. Tham số không thay được identifier; phải chọn từ danh sách cho phép.</dd>
+<dt>ORM / query builder</dt><dd>Thư viện tạo SQL thay bạn, như Drizzle, Prisma. An toàn khi dùng đúng API, vẫn có cửa "raw" cần cẩn thận.</dd>
+</dl>
+
+<h2>Truy vấn có tham số hoạt động thế nào</h2>
+<ol class="steps">
+<li><strong>Code gửi hai phần</strong>: câu SQL có <code>$1</code>, và mảng giá trị <code>[q]</code>.</li>
+<li><strong>Postgres phân tích câu SQL</strong> trước, khi chưa có dữ liệu, nên cấu trúc câu lệnh đã cố định.</li>
+<li><strong>Giá trị được gắn vào chỗ trống</strong> như dữ liệu thuần. Dấu nháy, dấu chấm phẩy trong đó chỉ là ký tự.</li>
+<li><strong>Chạy và trả kết quả</strong> như bình thường.</li>
+</ol>
+
 <h2>Lỗi bắt đầu từ một dấu nháy</h2>
 <p>Bạn cần ô tìm sách theo tên. Cách viết đầu tiên ai cũng nghĩ ra là ghép chuỗi:</p>
 <pre><code>// ĐỪNG viết thế này
@@ -15,7 +41,7 @@ const { rows } = await pool.query(`SELECT id, title FROM books WHERE title ILIKE
 </table></div>
 <p><code>--</code> là comment trong SQL, nên phần <code>%'</code> còn thừa bị bỏ qua. Dòng cuối chạy được thật với <code>pg</code>: khi câu lệnh không có tham số nào, <code>pg</code> gửi nó bằng chế độ cho phép nhiều câu cách nhau bởi dấu chấm phẩy.</p>
 
-<h2>Tự tay tấn công, trên bảng thử</h2>
+<h2>Làm thử: tự tay tấn công, trên bảng thử</h2>
 <p>Thêm vào <code>scripts/thu-pg.ts</code>, chạy trên database <code>books</code> của <code>sql-practice</code>:</p>
 <pre><code>await pool.query('CREATE TABLE IF NOT EXISTS thu_xoa (id int)');
 
@@ -76,9 +102,26 @@ await pool.query('SELECT id, title FROM books WHERE title ILIKE $1', [`%${escape
   <p><span class="wrong">"Dùng ORM thì không bao giờ bị SQL injection."</span><span class="fix">Chỉ khi không dùng các hàm SQL thô của nó. Hàm nào có chữ raw hay unsafe thì ghép chuỗi vào đó vẫn bị.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary><code>pool.query('SELECT * FROM books WHERE id = ' + id)</code>. Sửa thế nào?</summary><div><p><code>pool.query('SELECT * FROM books WHERE id = $1', [id])</code>.</p></div></details>
+<details><summary>Muốn cho người dùng chọn sắp xếp theo <code>title</code> hay <code>price</code>. Đặt tên cột vào <code>$1</code> được không?</summary><div><p>Không, tham số chỉ thay giá trị. Kiểm tra tên cột với danh sách cho phép rồi mới đặt vào câu SQL.</p></div></details>
+<details><summary>Validate bằng zod rồi thì còn cần tham số không?</summary><div><p>Vẫn cần. Chuỗi hợp lệ theo zod vẫn có thể chứa dấu nháy; tham số là lớp chặn chắc chắn.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>SQL injection là gì, bạn phòng nó thế nào?</summary><div><p>Là khi dữ liệu người dùng gửi lên được ghép thẳng vào câu SQL, nên một chuỗi có dấu nháy có thể đổi nghĩa câu lệnh: đọc bảng khác, bỏ qua điều kiện đăng nhập, xoá dữ liệu. Tôi phòng bằng truy vấn có tham số: câu lệnh gửi đi với các chỗ trống $1, $2, giá trị gửi riêng, nên database không bao giờ đọc giá trị như SQL. Những chỗ tham số không làm được, như tên cột để sắp xếp, tôi dùng danh sách cho phép viết sẵn trong code.</p></div></details>
   <details><summary>Vì sao truy vấn có tham số chặn được injection?</summary><div><p>Vì database phân tích câu lệnh trước khi nhận giá trị. Khi phân tích xong, nó đã biết $1 là một giá trị kiểu chuỗi ở vị trí nào. Giá trị đến sau chỉ được đặt vào chỗ đó, nên dù có dấu nháy hay chấm phẩy thì nó vẫn chỉ là dữ liệu. Ngoài ra, khi có tham số, PostgreSQL không cho một lệnh chứa nhiều câu.</p></div></details>
   <details><summary>Làm sao cho người dùng chọn cột sắp xếp mà vẫn an toàn?</summary><div><p>Tên cột không thể là tham số, nên tôi định nghĩa sẵn một object ánh xạ từ lựa chọn của người dùng, như title hay newest, sang đoạn ORDER BY viết cứng trong code. Người dùng chỉ gửi chìa khoá, schema validate chỉ chấp nhận đúng các chìa khoá đó, và chuỗi được ghép vào SQL luôn là chuỗi do tôi viết.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Không bao giờ ghép dữ liệu người dùng vào chuỗi SQL.</li>
+<li>Luôn dùng <code>$1</code>, <code>$2</code> và mảng giá trị; database không nhầm dữ liệu với lệnh.</li>
+<li>Tên bảng, tên cột thì chọn từ danh sách cho phép, vì tham số không thay được chúng.</li>
+</ol>
 </div>

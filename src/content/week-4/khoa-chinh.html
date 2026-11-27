@@ -1,3 +1,22 @@
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Khoá chính</strong> (primary key) là cột dùng để chỉ đúng một dòng trong bảng, như số căn cước cho mỗi người. Mọi khoá ngoại ở bảng khác trỏ vào nó, nên chọn sai rất khó sửa về sau.</p>
+<p>Hình dung số báo danh trong kỳ thi: mỗi thí sinh một số, không trùng, không bỏ trống, và không đổi giữa chừng. Tên thí sinh thì có thể trùng và có thể viết sai rồi sửa, nên không dùng tên làm số báo danh.</p>
+</div>
+
+<h2>Vì sao chọn khoá chính cẩn thận</h2>
+<p>Khoá chính được chép sang mọi bảng con (học sinh trỏ tới lớp, khoản đóng trỏ tới hoá đơn) và nằm trong mọi index liên quan. Chọn một giá trị có thể đổi, như số điện thoại, thì một lần đổi số là phải sửa dây chuyền khắp database. Chọn kiểu quá to thì mọi bảng và index đều phình theo.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Khoá chính</dt><dd>Cột (hay nhóm cột) định danh mỗi dòng: duy nhất, luôn có giá trị, không đổi, gọn.</dd>
+<dt>Khoá tự nhiên</dt><dd>Giá trị có sẵn ngoài đời, như ISBN, email, số điện thoại.</dd>
+<dt>Khoá thay thế</dt><dd>Giá trị database tự sinh, không mang nghĩa gì, chỉ để định danh.</dd>
+<dt><code>bigint IDENTITY</code></dt><dd>Số nguyên tự tăng 1, 2, 3… do Postgres sinh.</dd>
+<dt>UUID</dt><dd>Chuỗi 128 bit gần như không thể trùng, sinh được ở bất kỳ đâu. v4 ngẫu nhiên, v7 có thời gian ở đầu.</dd>
+<dt>Khoá ghép</dt><dd>Khoá chính gồm nhiều cột, ví dụ (học sinh, buổi học) trong bảng điểm danh.</dd>
+</dl>
+
 <h2>Khoá chính phải làm được gì</h2>
 <p>Một cột hay một nhóm cột chỉ nên làm khoá chính khi nó đạt đủ bốn điều:</p>
 <ol class="list">
@@ -53,6 +72,18 @@ SELECT pg_column_size(1::bigint), pg_column_size(uuidv7());   -- 8 và 16</code>
 <p><code>enrollments</code> dùng khoá chính hai cột <code>(class_id, student_id)</code>. Đây là chỗ khoá ghép hợp lý nhất: bảng nối mà cặp hai id chính là danh tính của dòng. Nó tự chặn việc ghi danh một học sinh hai lần vào cùng một lớp.</p>
 <p>Cái giá là bảng nào trỏ tới nó phải mang cả hai cột, như <code>invoices</code> đang làm. Nếu sau này có ba bảng trỏ tới <code>enrollments</code>, có thể cân nhắc thêm cột <code>id</code> riêng và giữ <code>UNIQUE (class_id, student_id)</code>. Với hocphi lúc này thì chưa cần.</p>
 
+<h2>Làm thử: chọn khoá cho từng bảng</h2>
+<p>Tự chọn khoá chính cho mỗi bảng, rồi so với gợi ý.</p>
+<div class="tbl"><table>
+<thead><tr><th>Bảng</th><th>Gợi ý</th></tr></thead>
+<tbody>
+<tr><td>Giáo viên (có email, số điện thoại)</td><td>Khoá thay thế. Email và số điện thoại có thể đổi; đặt <code>UNIQUE</code> trên email thay vì làm khoá chính.</td></tr>
+<tr><td>Sách (có ISBN)</td><td>Khoá thay thế, kèm <code>UNIQUE</code> trên ISBN. Sách cũ có thể không có ISBN, và ISBN nhập sai cần sửa được.</td></tr>
+<tr><td>Điểm danh (học sinh, buổi học)</td><td>Khoá ghép <code>(student_id, session_id)</code>: mỗi học sinh chỉ có một dòng cho mỗi buổi.</td></tr>
+</tbody>
+</table></div>
+<p>Chạy thử trong <code>psql</code> để so kích thước: <code>SELECT pg_column_size(1::bigint), pg_column_size(gen_random_uuid());</code> ra <code>8</code> và <code>16</code> byte.</p>
+
 <h2>Bút đỏ: những câu nghe đúng mà sai</h2>
 <div class="redpen">
   <p><span class="wrong">"Số điện thoại là duy nhất, dùng làm khoá chính luôn cho gọn."</span><span class="fix">Duy nhất chưa đủ, khoá chính còn phải không bao giờ đổi. Dùng id tự sinh làm khoá chính, đặt UNIQUE trên số điện thoại.</span></p>
@@ -60,9 +91,26 @@ SELECT pg_column_size(1::bigint), pg_column_size(uuidv7());   -- 8 và 16</code>
   <p><span class="wrong">"Đã dùng UUID thì cứ gen_random_uuid() là được."</span><span class="fix">UUID ngẫu nhiên làm index khoá chính bị ghi rải rác. Trên PostgreSQL 18, nếu cần UUID làm khoá chính thì dùng uuidv7().</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Vì sao không dùng số điện thoại phụ huynh làm khoá chính?</summary><div><p>Số điện thoại có thể đổi; mọi khoản đóng trỏ tới nó sẽ phải sửa theo. Khoá chính phải không bao giờ đổi.</p></div></details>
+<details><summary>Lộ id dạng 1, 2, 3 trên URL có nguy hiểm không?</summary><div><p>Bản thân id không phải bí mật. Nguy hiểm thật là thiếu phân quyền: ai đoán được id là xem được. Sửa bằng kiểm tra quyền, không chỉ bằng đổi sang UUID.</p></div></details>
+<details><summary>UUID v7 hơn v4 ở điểm nào khi làm khoá chính?</summary><div><p>Phần đầu là thời gian nên giá trị mới luôn lớn dần, index B-tree chèn ở cuối, ít phân mảnh như v4 ngẫu nhiên.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Bạn chọn số tự tăng hay UUID làm khoá chính?</summary><div><p>Mặc định tôi dùng bigint identity: 8 byte, ghi index nhanh, dễ đọc khi debug. Tôi chọn UUID khi id phải được sinh ngoài database, như ở client chạy offline hoặc khi gộp dữ liệu từ nhiều nguồn, hoặc khi id lộ ra ngoài và không được để đoán số lượng. Khi đó tôi dùng UUID v7 vì nó tăng theo thời gian nên không làm index phân mảnh như v4. Nếu chỉ một vài id cần công khai, tôi thêm một cột UUID riêng và giữ khoá chính là bigint.</p></div></details>
   <details><summary>Khoá tự nhiên và khoá thay thế khác nhau thế nào?</summary><div><p>Khoá tự nhiên là giá trị có nghĩa ngoài đời như email hay số điện thoại. Khoá thay thế là giá trị database tự sinh, không mang nghĩa. Tôi dùng khoá thay thế làm khoá chính vì giá trị ngoài đời thường thay đổi, và đổi khoá chính kéo theo mọi khoá ngoại. Khoá tự nhiên vẫn được bảo vệ bằng ràng buộc UNIQUE.</p></div></details>
   <details><summary>Vì sao UUID v4 làm chậm việc ghi?</summary><div><p>Index B-tree sắp theo giá trị khoá. Với số tăng dần hay UUID v7, dòng mới luôn rơi vào trang cuối của cây, trang đó nằm sẵn trong bộ nhớ. Với UUID v4 ngẫu nhiên, mỗi dòng mới rơi vào một trang bất kỳ. Database phải đọc nhiều trang khác nhau, tách trang thường xuyên hơn, và index phình to hơn so với cùng lượng dữ liệu.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Khoá chính phải duy nhất, luôn có giá trị, không đổi và gọn.</li>
+<li>Thường dùng khoá thay thế (<code>bigint IDENTITY</code> hoặc UUID v7); giá trị tự nhiên thì đặt <code>UNIQUE</code>.</li>
+<li>Id lộ ra không phải lỗi; thiếu phân quyền mới là lỗi.</li>
+</ol>
 </div>

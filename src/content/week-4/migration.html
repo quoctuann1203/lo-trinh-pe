@@ -1,3 +1,9 @@
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Migration</strong> là một file SQL mô tả một lần thay đổi schema (thêm bảng, thêm cột…), được đánh số theo thời gian và chạy đúng một lần trên mỗi database. Cả lịch sử thay đổi schema nằm trong repo, cạnh code.</p>
+<p>Hình dung sổ ghi các lần sửa nhà: "tháng 3 xây thêm phòng, tháng 6 lát lại sàn". Thợ mới đến đọc sổ là làm được một căn y hệt từ nền đất trống, không cần đoán.</p>
+</div>
+
 <h2>Vì sao không sửa schema.sql nữa</h2>
 <p>Ở tuần 3, mỗi lần đổi schema bạn sửa <code>schema.sql</code> rồi chạy lại từ đầu, vì file bắt đầu bằng <code>DROP TABLE</code>. Cách đó chỉ đúng khi dữ liệu không quan trọng. Khi đã có giáo viên dùng thật, xoá bảng là mất sổ thu tiền của họ.</p>
 <p>Cách thứ hai là mở psql trên server và gõ <code>ALTER TABLE</code> bằng tay. Một tháng sau không ai nhớ đã gõ gì. Máy bạn, máy đồng đội và server lệch nhau, và lỗi chỉ hiện ra khi deploy.</p>
@@ -7,6 +13,25 @@
   20261203093000_books_author_set_null.sql
   20261203100000_add_updated_at.sql</code></pre>
 <p>Database giữ một bảng <code>schema_migrations</code> ghi lại file nào đã chạy. Lệnh <code>up</code> chạy những file chưa có trong bảng đó, theo thứ tự tên. Database ở đâu cũng đi qua đúng các bước giống nhau, theo đúng thứ tự.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Schema</dt><dd>Cấu trúc database: bảng, cột, kiểu, ràng buộc, index.</dd>
+<dt>Migration</dt><dd>File thay đổi schema một bước, có phần <em>up</em> (làm) và <em>down</em> (hoàn tác).</dd>
+<dt>dbmate</dt><dd>Công cụ chạy migration viết bằng SQL thuần.</dd>
+<dt>Bảng <code>schema_migrations</code></dt><dd>Bảng dbmate tạo để nhớ migration nào đã chạy.</dd>
+<dt><code>db/schema.sql</code></dt><dd>Ảnh chụp schema hiện tại, dbmate tự cập nhật sau mỗi lần chạy.</dd>
+<dt>Rollback</dt><dd>Chạy phần down để hoàn tác migration gần nhất.</dd>
+</dl>
+
+<h2>Migration hoạt động thế nào</h2>
+<ol class="steps">
+<li><strong>Tạo file</strong>: <code>dbmate new them_cot_x</code> sinh file có số thời gian ở đầu tên.</li>
+<li><strong>Viết SQL</strong> cho phần up và phần down.</li>
+<li><strong>Chạy</strong> <code>dbmate up</code>: dbmate xem bảng <code>schema_migrations</code>, chạy những file chưa chạy theo thứ tự, mỗi file trong một transaction.</li>
+<li><strong>Ghi nhận</strong>: thành công thì thêm tên file vào <code>schema_migrations</code> và cập nhật <code>db/schema.sql</code>.</li>
+<li><strong>Commit</strong> file migration cùng code dùng tới nó.</li>
+</ol>
 
 <h2>dbmate: công cụ migration bằng SQL thuần</h2>
 <p>Có rất nhiều công cụ migration. Nhiều cái gắn với một ORM, bạn viết schema bằng TypeScript rồi công cụ sinh SQL. Tuần này dùng dbmate vì bạn viết thẳng SQL, đúng thứ bạn vừa học ở tuần 3, và nó không phụ thuộc ngôn ngữ của ứng dụng. Chạy nó bằng Docker nên không cần cài gì thêm. Thêm vào <code>compose.yaml</code> của <code>sql-practice</code>:</p>
@@ -89,7 +114,7 @@ docker compose run --rm dbmate status
   <li><strong>Dữ liệu mẫu không nằm trong migration.</strong> Migration chạy ở mọi môi trường, kể cả server thật. 20 cuốn sách mẫu nằm trong file seed riêng, chỉ chạy trên máy mình.</li>
 </ol>
 
-<h2>Bài luyện Thứ Năm</h2>
+<h2>Làm thử: bài luyện Thứ Năm</h2>
 <ol class="list">
   <li>Tạo migration <code>create_books</code> từ <code>02-schema.sql</code>. Chạy <code>up</code>, <code>status</code>, <code>down</code>, <code>status</code>, <code>up</code>.</li>
   <li>Cố tình viết sai một câu ở giữa migration thứ hai, chạy <code>up</code>, rồi dùng <code>\d</code> kiểm tra rằng không có gì thay đổi.</li>
@@ -104,9 +129,26 @@ docker compose run --rm dbmate status
   <p><span class="wrong">"Cho dữ liệu mẫu vào migration để ai chạy cũng có sẵn."</span><span class="fix">Migration chạy cả trên server thật. Dữ liệu mẫu nằm trong file seed riêng.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Migration đã chạy trên server và đã commit. Phát hiện sai một cột. Sửa thẳng file đó được không?</summary><div><p>Không. Database đã chạy rồi sẽ không chạy lại file đó. Viết một migration mới để sửa.</p></div></details>
+<details><summary>Vì sao mỗi migration chạy trong một transaction?</summary><div><p>Để lỗi giữa chừng thì cả file được hoàn tác, database không bị kẹt ở trạng thái nửa vời.</p></div></details>
+<details><summary>Đồng đội clone repo về, database trống. Làm sao có schema giống bạn?</summary><div><p>Chạy <code>dbmate up</code>: mọi migration chạy lần lượt từ đầu.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Database migration là gì, vì sao cần?</summary><div><p>Migration là các file mô tả từng thay đổi schema, đánh số theo thứ tự và được quản lý trong Git cùng với code. Công cụ migration ghi lại trong database những file nào đã chạy, nên mỗi môi trường chỉ chạy phần còn thiếu. Nhờ vậy mọi database đi qua cùng các bước, thay đổi schema được review như code, và ai clone repo về cũng dựng lại được schema bằng một lệnh.</p></div></details>
   <details><summary>Một migration đã chạy trên production bị sai, bạn làm gì?</summary><div><p>Tôi không sửa file cũ, vì production đã ghi nhận nó là đã chạy. Tôi viết một migration mới để sửa, kiểm tra nó trên bản sao dữ liệu, rồi deploy như bình thường. Chạy down trên production chỉ khi chắc chắn down không làm mất dữ liệu, mà với những thay đổi như xoá cột thì điều đó không đúng.</p></div></details>
   <details><summary>Vì sao commit cả file schema.sql do công cụ sinh ra?</summary><div><p>Vì nó là ảnh chụp schema hiện tại, đọc một file nhanh hơn cộng dồn mọi migration. Khi review, diff của nó cho thấy chính xác migration đã làm gì với schema, kể cả tác dụng phụ ngoài ý muốn. Nó cũng giúp phát hiện khi database của ai đó lệch khỏi migration.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Mỗi thay đổi schema là một file migration có up và down, lưu trong repo.</li>
+<li>dbmate nhớ file nào đã chạy trong <code>schema_migrations</code>; mỗi file chạy trong một transaction.</li>
+<li>Migration đã chạy thì không sửa; sai thì viết migration mới.</li>
+</ol>
 </div>

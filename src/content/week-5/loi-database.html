@@ -1,4 +1,31 @@
-<h2>Một lỗi của PostgreSQL trông thế nào</h2>
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p>Khi một câu SQL thất bại, <code>pg</code> ném một lỗi có <strong>mã lỗi</strong> của Postgres, ví dụ <code>23505</code> là trùng giá trị <code>UNIQUE</code>. Bài này chỉ cách đọc mã đó và chuyển nó thành mã HTTP đúng (409, 404, 500) mà không làm lộ chi tiết nội bộ ra ngoài.</p>
+<p>Hình dung đèn báo trên taplô ô tô: mỗi đèn một mã, thợ nhìn mã là biết hỏng ở đâu. Mã lỗi Postgres là đèn báo; việc của bạn là dịch nó thành câu người dùng hiểu được.</p>
+</div>
+
+<h2>Vì sao phải dịch lỗi database</h2>
+<p>Không dịch thì mọi lỗi database đều rơi vào nhánh 500 "Lỗi máy chủ", kể cả khi lỗi là do người dùng nhập ISBN đã có. Front-end không biết báo gì cho người dùng. Ngược lại, trả nguyên thông báo của Postgres ra ngoài thì lộ tên bảng, tên ràng buộc, đôi khi cả dữ liệu.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Mã lỗi (SQLSTATE)</dt><dd>Mã 5 ký tự Postgres gắn cho mỗi loại lỗi, nằm ở <code>err.code</code>.</dd>
+<dt><code>23505</code></dt><dd>Vi phạm <code>UNIQUE</code>: giá trị đã tồn tại. Thường chuyển thành 409.</dd>
+<dt><code>23503</code></dt><dd>Vi phạm khoá ngoại: trỏ tới dòng không tồn tại, hoặc xoá dòng còn bị trỏ tới.</dd>
+<dt><code>22P02</code></dt><dd>Giá trị không đúng dạng kiểu, ví dụ <code>'abc'</code> vào cột số.</dd>
+<dt><code>err.constraint</code></dt><dd>Tên ràng buộc bị vi phạm, để biết chính xác cột nào trùng.</dd>
+<dt>Bảng chuyển mã</dt><dd>Một hàm duy nhất đổi lỗi database thành <code>AppError</code> có mã HTTP.</dd>
+</dl>
+
+<h2>Lỗi database đi qua app thế nào</h2>
+<ol class="steps">
+<li><strong>Câu SQL thất bại</strong>, <code>pg</code> ném lỗi kèm <code>code</code>, <code>constraint</code>, <code>detail</code>.</li>
+<li><strong>Lớp store bắt lỗi</strong> và đưa qua bảng chuyển mã.</li>
+<li><strong>Lỗi đã biết</strong> (trùng, khoá ngoại sai) thành <code>AppError</code> 409 hay 422 với thông báo dễ hiểu.</li>
+<li><strong>Lỗi lạ</strong> được ném tiếp, rơi vào <code>app.onError</code>: ghi log đầy đủ, trả 500 chung chung.</li>
+</ol>
+
+<h2>Làm thử: một lỗi của PostgreSQL trông thế nào</h2>
 <p>Thêm hai cuốn sách cùng ISBN, rồi in ra lỗi mà <code>pg</code> ném:</p>
 <pre><code>try {
   await pool.query("INSERT INTO books (title, author, isbn) VALUES ('Số đỏ', 'Vũ Trọng Phụng', '1')");
@@ -95,9 +122,26 @@ app.get('/books/:id', async (c) =&gt; {
   <p><span class="wrong">"Đã có ràng buộc trong database thì không cần validate bằng zod."</span><span class="fix">Cần cả hai. Zod cho thông báo lỗi theo từng trường mà client hiển thị được. Ràng buộc là lưới an toàn cuối cùng.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Tạo sách với ISBN đã có. Nên kiểm tra trước bằng <code>SELECT</code> hay cứ <code>INSERT</code> rồi bắt lỗi?</summary><div><p>Cứ <code>INSERT</code> rồi bắt <code>23505</code>. Kiểm trước vẫn có thể bị request khác chen vào giữa; ràng buộc <code>UNIQUE</code> mới chắc chắn.</p></div></details>
+<details><summary><code>GET /books/abc</code> mà id là số. Nên để Postgres báo <code>22P02</code> không?</summary><div><p>Không, chặn trước bằng validate tham số và trả 400/404, khỏi gửi SQL vô ích.</p></div></details>
+<details><summary>Database mất kết nối. Người dùng nên thấy gì?</summary><div><p>Một lỗi 500 hoặc 503 chung chung, không có chi tiết nội bộ. Log thì ghi đầy đủ.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Làm sao chặn trùng email hay số điện thoại khi có nhiều request cùng lúc?</summary><div><p>Đặt ràng buộc UNIQUE trong database, rồi cứ ghi và bắt lỗi vi phạm, với PostgreSQL là mã 23505 kèm tên ràng buộc. Kiểm tra trước bằng SELECT không đủ, vì giữa lúc kiểm tra và lúc ghi, một request khác có thể đã ghi. Tôi vẫn có thể kiểm tra trước để hiện lỗi sớm trên form, nhưng quyết định cuối cùng thuộc về ràng buộc.</p></div></details>
   <details><summary>Bạn chuyển lỗi database thành response HTTP thế nào?</summary><div><p>Ở lớp service, tôi bắt những lỗi tôi lường trước, dựa vào mã SQLSTATE và tên ràng buộc, rồi đổi thành lỗi nghiệp vụ có mã HTTP rõ ràng: trùng thì 409, tham chiếu tới thứ không tồn tại thì 422. Những lỗi còn lại rơi vào một chỗ xử lý chung, được ghi log đầy đủ và trả về 500 với thông báo chung chung, không lộ chi tiết của database.</p></div></details>
   <details><summary>Validate ở ứng dụng hay ràng buộc ở database?</summary><div><p>Cả hai, mỗi bên một việc. Validate ở ứng dụng để trả lỗi sớm, rõ ràng cho từng trường. Ràng buộc ở database để dữ liệu đúng dù có lỗi trong code, có request chạy đồng thời, hay có người ghi thẳng vào database. Những quy tắc không bao giờ được sai, như số tiền dương hay không trùng, tôi luôn đặt trong database.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Lỗi <code>pg</code> có mã Postgres ở <code>err.code</code>: <code>23505</code> trùng, <code>23503</code> khoá ngoại, <code>22P02</code> sai dạng.</li>
+<li>Một bảng chuyển mã đổi lỗi đã biết thành 4xx dễ hiểu; lỗi lạ thành 500.</li>
+<li>Để ràng buộc bắt trùng, đừng hỏi trước; không bao giờ trả thông báo của Postgres ra ngoài.</li>
+</ol>
 </div>

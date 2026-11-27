@@ -1,4 +1,23 @@
-<h2>Tiền: số nguyên, đơn vị nhỏ nhất</h2>
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Kiểu dữ liệu</strong> của một cột quyết định nó lưu được giá trị gì và tính toán ra sao. Chọn đúng kiểu cho tiền, thời gian, chuỗi và trạng thái tránh được cả một loạt lỗi khó thấy: tiền lệch vài đồng, giờ lệch múi, trạng thái gõ sai chính tả.</p>
+<p>Hình dung các ngăn trong hộp đồ nghề: ngăn ốc vít, ngăn đinh, ngăn dây điện. Để đúng ngăn thì lấy ra đúng thứ; đổ chung một ngăn thì lúc cần mới phát hiện lẫn lộn.</p>
+</div>
+
+<h2>Vì sao kiểu dữ liệu quan trọng</h2>
+<p>Lỗi do sai kiểu thường không báo đỏ, mà âm thầm cho kết quả sai: <code>0.1 + 0.2</code> ra <code>0.30000000000000004</code>, hạn đóng tiền lệch một ngày vì múi giờ, trạng thái <code>'da_dong'</code> và <code>'đã đóng'</code> cùng tồn tại trong một bảng. Với công cụ thu tiền, sai vài đồng là mất lòng tin của phụ huynh.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt><code>float8</code></dt><dd>Số thực dấu phẩy động, lưu ở hệ nhị phân, có sai số nhỏ. Không dùng cho tiền.</dd>
+<dt><code>bigint</code></dt><dd>Số nguyên lớn. Lưu tiền bằng số nguyên theo đơn vị nhỏ nhất (đồng).</dd>
+<dt><code>timestamptz</code></dt><dd>Một thời điểm chính xác trên trục thời gian, ví dụ lúc phụ huynh bấm thanh toán.</dd>
+<dt><code>date</code></dt><dd>Một ngày trên lịch, không có giờ, ví dụ hạn đóng tiền.</dd>
+<dt><code>text</code> + <code>CHECK</code></dt><dd>Chuỗi không giới hạn độ dài, thêm ràng buộc nếu cần giới hạn.</dd>
+<dt><code>jsonb</code></dt><dd>Lưu JSON trong một cột. Chỉ dành cho dữ liệu không có hình dạng cố định.</dd>
+</dl>
+
+<h2>Chọn kiểu thế nào: tiền là số nguyên, đơn vị nhỏ nhất</h2>
 <p>Chạy hai câu này và so kết quả:</p>
 <pre><code>SELECT 0.1::float8 + 0.2::float8 = 0.3::float8;   -- false
 SELECT 0.1 + 0.2 = 0.3;                            -- true
@@ -61,7 +80,7 @@ SELECT (timestamptz '2026-04-01 06:30:00+07' AT TIME ZONE 'Asia/Ho_Chi_Minh')::d
 <h2>jsonb: chỉ cho dữ liệu không có hình dạng cố định</h2>
 <p><code>jsonb</code> lưu được mọi thứ, và chính vì thế nó không bảo vệ được gì: không có <code>NOT NULL</code>, không có khoá ngoại, sai tên trường cũng không ai báo. Dùng nó cho dữ liệu bạn không kiểm soát hình dạng, như toàn bộ nội dung webhook ngân hàng gửi về ở tuần 14, để đối soát khi có tranh chấp. Không dùng nó cho số tiền, tên học sinh, hay bất cứ thứ gì bạn sẽ lọc và nối.</p>
 
-<h2>Bài luyện: 6 câu thử</h2>
+<h2>Làm thử: 6 câu thử</h2>
 <p>Ghi dự đoán vào notes trước, chạy sau:</p>
 <ol class="list">
   <li><code>SELECT 0.1::float8 * 3 = 0.3;</code></li>
@@ -79,9 +98,26 @@ SELECT (timestamptz '2026-04-01 06:30:00+07' AT TIME ZONE 'Asia/Ho_Chi_Minh')::d
   <p><span class="wrong">"varchar(255) nhanh hơn text."</span><span class="fix">Trong PostgreSQL hai kiểu lưu như nhau. Con số 255 là thói quen từ database khác.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Lưu học phí 1.250.000đ bằng kiểu gì?</summary><div><p>Số nguyên (<code>bigint</code> hoặc <code>integer</code>) giá trị <code>1250000</code>, đơn vị đồng.</p></div></details>
+<details><summary>Hạn đóng tiền ngày 10 hằng tháng nên dùng <code>date</code> hay <code>timestamptz</code>?</summary><div><p><code>date</code>: đó là ngày trên lịch, không phải một thời điểm.</p></div></details>
+<details><summary>Khi nào nên dùng <code>jsonb</code>?</summary><div><p>Khi dữ liệu không có hình dạng cố định, như payload webhook thô. Dữ liệu cần lọc, ràng buộc, nối bảng thì tách thành cột.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Bạn lưu số tiền bằng kiểu gì?</summary><div><p>Số nguyên theo đơn vị nhỏ nhất của tiền tệ, như đồng hoặc cent, trong cột bigint. Nếu cần phần lẻ chính xác thì dùng numeric. Tôi không dùng float vì nó không biểu diễn chính xác các số thập phân như 0,1, và sai số cộng dồn khi tính tổng. Nếu hệ thống có nhiều loại tiền, tôi lưu thêm cột mã tiền tệ bên cạnh.</p></div></details>
   <details><summary>timestamp và timestamptz khác nhau thế nào, bạn dùng cái nào?</summary><div><p>timestamptz biểu diễn một thời điểm cụ thể: đầu vào có múi giờ được đổi về UTC để lưu, và đọc ra theo múi giờ của phiên. timestamp chỉ là ngày giờ trên đồng hồ, không biết thuộc múi giờ nào. Tôi dùng timestamptz cho mọi sự kiện đã xảy ra, như lúc thanh toán, và date cho ngày trên lịch. Khi cần biết sự kiện rơi vào ngày nào theo giờ địa phương, tôi đổi múi giờ một cách tường minh.</p></div></details>
   <details><summary>Enum hay bảng tra cứu cho cột trạng thái?</summary><div><p>Nếu danh sách nhỏ, cố định và chỉ lập trình viên đổi, tôi dùng text với CHECK hoặc enum. Với PostgreSQL tôi nghiêng về CHECK vì bỏ một giá trị khỏi enum rất phiền. Nếu người dùng cần tự thêm giá trị hoặc mỗi giá trị có thêm thông tin như tên hiển thị, tôi dùng bảng tra cứu với khoá ngoại.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Tiền lưu bằng số nguyên theo đồng, không dùng <code>float</code>.</li>
+<li><code>timestamptz</code> cho thời điểm, <code>date</code> cho ngày lịch.</li>
+<li>Chuỗi dùng <code>text</code> + <code>CHECK</code>; trạng thái giới hạn giá trị; <code>jsonb</code> chỉ cho dữ liệu không cố định.</li>
+</ol>
 </div>

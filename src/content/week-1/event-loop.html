@@ -1,3 +1,33 @@
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Event loop</strong> là vòng lặp của Node quyết định <em>việc nào chạy tiếp theo</em>: hết code đang chạy thì nó lấy việc đã sẵn sàng (hẹn giờ đến giờ, file đọc xong, request mới tới) ra chạy, cứ thế lặp mãi.</p>
+<p>Hình dung người phục vụ quán phở ở bài trước. Anh ta có một cuốn sổ ghi các việc đang chờ: "bàn 3 phở xong", "bàn 5 gọi thêm trà". Mỗi lần rảnh tay, anh ta mở sổ, làm việc tiếp theo. Event loop chính là cuốn sổ và thói quen mở sổ đó.</p>
+</div>
+
+<h2>Vì sao phải hiểu event loop</h2>
+<p>Nếu không hiểu, bạn sẽ gặp những chuyện "khó hiểu" như: <code>setTimeout(fn, 0)</code> không chạy ngay; <code>console.log</code> in ra sai thứ tự mình nghĩ; cả server bỗng chậm 2 giây với mọi người dù database vẫn nhanh. Cả ba đều giải thích được bằng một quy tắc: <strong>JS chỉ chạy một việc mỗi lúc, và event loop chọn việc tiếp theo theo một thứ tự cố định.</strong></p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Call stack</dt><dd>Chồng các hàm đang chạy. Gọi hàm thì đặt lên đỉnh, hàm chạy xong thì lấy ra.</dd>
+<dt>Callback</dt><dd>Hàm bạn đưa cho người khác gọi sau, ví dụ hàm truyền vào <code>setTimeout</code>.</dd>
+<dt>Hàng đợi</dt><dd>Danh sách callback đã sẵn sàng, chờ tới lượt chạy.</dd>
+<dt>Macrotask</dt><dd>Việc lớn được xử lý theo từng pha: callback của hẹn giờ, của I/O, của <code>setImmediate</code>.</dd>
+<dt>Microtask</dt><dd>Việc nhỏ chạy ngay sau việc hiện tại: <code>.then</code> của promise, code sau <code>await</code>, <code>process.nextTick</code>.</dd>
+<dt>Pha (phase)</dt><dd>Một chặng trong mỗi vòng event loop. Mỗi pha lo một loại macrotask.</dd>
+<dt>Chặn event loop</dt><dd>Một đoạn code chạy lâu khiến event loop không lấy được việc khác ra chạy.</dd>
+</dl>
+
+<h2>Event loop hoạt động thế nào</h2>
+<ol class="steps">
+<li><strong>Chạy hết code đồng bộ</strong> của file từ trên xuống, từng hàm một trên call stack.</li>
+<li><strong>Việc phải chờ được giao đi</strong>: hẹn giờ, đọc file, gọi mạng đều được đăng ký với libuv. JS không đứng chờ.</li>
+<li><strong>Xả microtask</strong>: khi call stack rỗng, Node chạy hết hàng <code>nextTick</code>, rồi hết hàng promise.</li>
+<li><strong>Đi một vòng qua các pha</strong>: timers, poll (I/O), check (<code>setImmediate</code>)… ở mỗi pha chạy các callback đã sẵn sàng. Sau <em>mỗi</em> callback lại xả microtask.</li>
+<li><strong>Lặp lại</strong> cho tới khi không còn việc gì chờ thì process thoát.</li>
+</ol>
+<p>Các mục dưới đây đi sâu vào từng bước.</p>
+
 <h2>Call stack: nơi code đang chạy</h2>
 <p>Mỗi lần gọi một hàm, JS đặt hàm đó lên đỉnh <strong>call stack</strong>. Hàm chạy xong thì được lấy ra. JS chỉ chạy cái đang nằm trên đỉnh.</p>
 <pre><code>function tinhTien(soBuoi: number) { return soBuoi * 150_000; }
@@ -38,7 +68,8 @@ inHoaDon();
 </svg>
 <figcaption>Ô màu tím không phải một pha. Nó chạy sau từng callback ở bất kỳ pha nào, nên promise luôn chạy trước <code>setTimeout(fn, 0)</code>.</figcaption>
 </figure>
-<h2>Thử đoán thứ tự</h2>
+<h2>Làm thử: đoán thứ tự in ra</h2>
+<p>Đọc đoạn code, tự viết ra thứ tự bạn đoán, rồi mới chạy để so.</p>
 <pre><code><span class="c">// order.cts, chạy: node order.cts</span>
 console.log('A: sync');
 setTimeout(() =&gt; console.log('E: timeout'), 0);
@@ -75,10 +106,27 @@ setInterval(() =&gt; {
 <p><span class="wrong">"Promise chạy trên luồng khác."</span><span class="fix">Sai. Hàm truyền vào new Promise chạy đồng bộ ngay. Chỉ .then mới chạy sau, dưới dạng microtask.</span></p>
 <p><span class="wrong">"nextTick chạy ở vòng event loop sau."</span><span class="fix">Sai, dù cái tên gợi ý vậy. Nó chạy ngay sau thao tác hiện tại. setImmediate mới là cái chạy lượt sau.</span></p>
 </div>
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary><code>console.log('1'); setTimeout(() =&gt; console.log('2'), 0); Promise.resolve().then(() =&gt; console.log('3')); console.log('4');</code> in ra gì?</summary><div><p>1, 4, 3, 2. Code đồng bộ chạy trước (1, 4), rồi microtask (3), rồi mới tới hẹn giờ (2).</p></div></details>
+<details><summary><code>setTimeout(fn, 100)</code> có chắc chắn chạy đúng sau 100 ms không?</summary><div><p>Không. 100 ms là thời gian chờ tối thiểu. Nếu luồng JS đang bận một việc nặng, <code>fn</code> phải chờ việc đó xong.</p></div></details>
+<details><summary>Cả server chậm với mọi người dùng cùng lúc, database vẫn nhanh. Nghi ngờ đầu tiên là gì?</summary><div><p>Event loop bị chặn bởi một đoạn code chạy lâu trên luồng chính. Đo bằng <code>monitorEventLoopDelay</code>.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
 <details><summary>Giải thích event loop trong một phút.</summary><div><p>JS trong Node chạy trên một luồng. Việc chờ như timer hay I/O được giao cho libuv và hệ điều hành; khi xong, callback vào hàng đợi. Event loop đi qua các pha theo thứ tự timers, poll cho I/O, check cho <code>setImmediate</code>, và ở mỗi pha chạy các callback đã sẵn sàng. Sau mỗi callback, Node xả hết microtask, trước là <code>nextTick</code> rồi tới promise. Vì chỉ có một luồng, một callback chạy lâu sẽ chặn tất cả việc khác.</p></div></details>
 <details><summary>Microtask và macrotask khác nhau thế nào?</summary><div><p>Macrotask là callback xử lý theo pha: <code>setTimeout</code>, I/O, <code>setImmediate</code>. Microtask chạy ngay sau tác vụ hiện tại: promise, <code>queueMicrotask</code>, <code>nextTick</code>. Microtask luôn được xả hết trước macrotask kế tiếp, nên <code>Promise.resolve().then(f)</code> chạy trước <code>setTimeout(g, 0)</code>.</p></div></details>
 <details><summary><code>setImmediate</code> và <code>setTimeout(fn, 0)</code> khác gì?</summary><div><p><code>setImmediate</code> chạy ở pha check, ngay sau poll. <code>setTimeout</code> chạy ở pha timers. Trong callback I/O, <code>setImmediate</code> luôn chạy trước. Ở code chính thì thứ tự không được đảm bảo.</p></div></details>
 <details><summary>API thỉnh thoảng chậm 2 giây với mọi người. Bạn điều tra thế nào?</summary><div><p>Mọi request cùng chậm gợi ý event loop bị chặn, không phải database chậm. Đo độ trễ event loop bằng <code>monitorEventLoopDelay</code>, chạy profiler (<code>node --cpu-prof</code> hoặc DevTools qua <code>node --inspect</code>) để tìm hàm chiếm CPU, rồi kiểm tra các thủ phạm quen thuộc: hàm <code>*Sync</code>, <code>JSON.parse</code> dữ liệu lớn, regex, vòng lặp lớn. Sửa bằng cách chia nhỏ việc, chuyển sang <code>worker_threads</code>, hoặc đưa ra hàng đợi công việc.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>JS chạy một việc mỗi lúc; event loop chọn việc tiếp theo khi call stack rỗng.</li>
+<li>Thứ tự: code đồng bộ, rồi microtask (<code>nextTick</code>, promise), rồi macrotask theo pha (timers, I/O, <code>setImmediate</code>).</li>
+<li>Một callback chạy lâu chặn tất cả mọi người. Đo độ trễ event loop để phát hiện.</li>
+</ol>
 </div>

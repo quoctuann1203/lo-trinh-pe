@@ -1,3 +1,30 @@
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Ràng buộc</strong> (constraint) là quy tắc bạn khai báo ngay trên bảng để database tự từ chối dữ liệu sai: giá không được âm, ISBN không được trùng, sách phải có tên. Dù code có bug, dữ liệu xấu vẫn không vào được bảng.</p>
+<p>Hình dung khuôn làm bánh: bột đổ vào khuôn nào thì ra hình khuôn đó, không thể ra hình khác. Kiểu dữ liệu và ràng buộc là cái khuôn của mỗi cột.</p>
+</div>
+
+<h2>Vì sao kiểm ở database khi đã có zod</h2>
+<p>zod kiểm dữ liệu đi qua API. Nhưng dữ liệu còn vào database qua nhiều đường khác: script nhập dữ liệu, một API khác viết sau, một lần sửa tay trong <code>psql</code>, hay một bug quên gọi validate. Ràng buộc ở database là lớp bảo vệ cuối, đúng với mọi đường vào.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Kiểu dữ liệu</dt><dd>Loại giá trị một cột nhận được: <code>text</code>, <code>integer</code>, <code>date</code>… Đây là ràng buộc đầu tiên.</dd>
+<dt><code>NOT NULL</code></dt><dd>Cột bắt buộc có giá trị.</dd>
+<dt><code>UNIQUE</code></dt><dd>Không hai dòng nào trùng giá trị ở cột này.</dd>
+<dt><code>CHECK</code></dt><dd>Điều kiện tự viết, ví dụ <code>CHECK (price &gt;= 0)</code>.</dd>
+<dt><code>PRIMARY KEY</code></dt><dd>Cột định danh mỗi dòng: không rỗng, không trùng.</dd>
+<dt><code>FOREIGN KEY</code></dt><dd>Cột trỏ sang khoá chính của bảng khác; database không cho trỏ tới dòng không tồn tại.</dd>
+</dl>
+
+<h2>Ràng buộc hoạt động thế nào</h2>
+<ol class="steps">
+<li><strong>Bạn khai báo</strong> ràng buộc trong <code>CREATE TABLE</code>.</li>
+<li><strong>Mỗi lần <code>INSERT</code> hay <code>UPDATE</code></strong>, database kiểm tra dòng mới với mọi ràng buộc.</li>
+<li><strong>Vi phạm một cái</strong> thì cả câu lệnh bị từ chối, kèm thông báo nói rõ ràng buộc nào. Không có dòng nào được ghi dở.</li>
+<li><strong>App bắt lỗi đó</strong> và trả mã phù hợp, ví dụ trùng ISBN thì 409 (học ở tuần 5).</li>
+</ol>
+
 <h2>Chọn kiểu dữ liệu</h2>
 <p>Kiểu dữ liệu là ràng buộc đầu tiên: cột <code>date</code> không bao giờ chứa được chữ "hôm qua". Bảng dưới đây đủ dùng cho hầu hết bảng của một web app.</p>
 <div class="tbl"><table>
@@ -74,7 +101,7 @@ CREATE TABLE reviews (
   </tbody>
 </table></div>
 
-<h2>Bài luyện: 5 lệnh INSERT sai</h2>
+<h2>Làm thử: 5 lệnh INSERT sai</h2>
 <p>Nạp vài tác giả và sách hợp lệ trước, rồi chạy từng lệnh dưới đây. Chép thông báo lỗi của mỗi lệnh vào notes và gạch chân tên ràng buộc trong đó.</p>
 <pre><code>INSERT INTO books (title, price) VALUES (NULL, 50000);
 -- null value in column "title" of relation "books" violates not-null constraint
@@ -99,10 +126,27 @@ INSERT INTO reviews (book_id, rating) VALUES (1, 6);
   <p><span class="wrong">"Lưu tiền bằng float cho tiện tính toán."</span><span class="fix">Số thực có sai số làm tròn. Tiền dùng bigint theo đơn vị nhỏ nhất, hoặc numeric.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Muốn chắc giá sách không bao giờ âm, dù ai ghi vào bảng. Dùng ràng buộc gì?</summary><div><p><code>CHECK (price &gt;= 0)</code> trên cột <code>price</code>.</p></div></details>
+<details><summary>Hai cuốn sách cùng ISBN được ghi vào bảng. Thiếu ràng buộc gì?</summary><div><p><code>UNIQUE</code> trên cột <code>isbn</code>.</p></div></details>
+<details><summary>Một lệnh <code>INSERT</code> 3 dòng, dòng thứ 2 vi phạm <code>CHECK</code>. Bao nhiêu dòng được ghi?</summary><div><p>Không dòng nào: cả câu lệnh bị từ chối.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Đã validate ở ứng dụng thì có cần ràng buộc trong database không?</summary><div><p>Có. Validate ở ứng dụng để báo lỗi thân thiện và sớm. Ràng buộc trong database là bảo đảm cuối cùng, áp cho mọi đường ghi dữ liệu kể cả script và code tương lai, và là cách duy nhất chống trùng khi nhiều request chạy song song. Hai lớp này bổ sung cho nhau, không thay thế nhau.</p></div></details>
   <details><summary>Bạn lưu tiền bằng kiểu gì, vì sao?</summary><div><p>Với tiền tệ không có phần lẻ như đồng Việt Nam, tôi dùng bigint theo đơn vị đồng. Với tiền có phần lẻ thì bigint theo đơn vị nhỏ nhất như cent, hoặc numeric với số chữ số cố định. Không dùng float hay double vì sai số làm tròn, cũng không dùng kiểu money của Postgres vì nó phụ thuộc cấu hình ngôn ngữ của server.</p></div></details>
   <details><summary>timestamp và timestamptz khác nhau thế nào?</summary><div><p>timestamptz lưu một thời điểm tuyệt đối, bên trong là UTC, và hiển thị theo múi giờ của phiên kết nối. timestamp chỉ lưu ngày giờ không kèm múi giờ, nên không biết đó là giờ ở đâu. Với thời điểm sự kiện xảy ra như lúc thanh toán, luôn dùng timestamptz.</p></div></details>
   <details><summary>ON DELETE CASCADE nguy hiểm ở chỗ nào?</summary><div><p>Một lệnh DELETE nhỏ có thể xoá dây chuyền rất nhiều dữ liệu ở các bảng khác mà người viết không để ý. Tôi chỉ dùng CASCADE khi dòng con hoàn toàn vô nghĩa nếu thiếu dòng cha, như các dòng chi tiết của một đơn hàng nháp. Với dữ liệu tài chính như hoá đơn, tôi để mặc định chặn xoá và dùng xoá mềm.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Ràng buộc là quy tắc trên bảng; database tự từ chối dữ liệu sai, dù đến từ đường nào.</li>
+<li>Năm loại hay dùng: <code>NOT NULL</code>, <code>UNIQUE</code>, <code>CHECK</code>, <code>PRIMARY KEY</code>, <code>FOREIGN KEY</code>.</li>
+<li>zod bảo vệ API, ràng buộc bảo vệ dữ liệu; cần cả hai.</li>
+</ol>
 </div>

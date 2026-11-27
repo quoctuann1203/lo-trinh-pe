@@ -1,4 +1,22 @@
-<h2>Đoán trước khi chạy</h2>
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Lớp store</strong> (kho dữ liệu) là một file gom mọi câu SQL của một loại dữ liệu vào các hàm có kiểu rõ ràng, như <code>getBook(id)</code>, <code>createBook(input)</code>. Route và service chỉ gọi hàm, không viết SQL, và không phải lo đổi kiểu dữ liệu từ database sang JavaScript.</p>
+<p>Hình dung thủ kho của quán: đầu bếp chỉ nói "cho tôi 2 kg thịt", thủ kho biết thịt nằm ngăn nào, cân đúng, ghi sổ. Đầu bếp không cần biết kho xếp ra sao.</p>
+</div>
+
+<h2>Vì sao cần một lớp store</h2>
+<p>Postgres và JavaScript không hiểu kiểu dữ liệu giống nhau: <code>count(*)</code> về JavaScript là chuỗi <code>'42'</code>, cột <code>numeric</code> cũng là chuỗi, tên cột viết kiểu <code>created_at</code> thay vì <code>createdAt</code>. Nếu SQL rải khắp các route, mỗi chỗ tự đổi kiểu một cách, sớm muộn sẽ có chỗ quên. Gom về một chỗ thì đổi kiểu đúng một lần, và đổi từ <code>Map</code> sang Postgres chỉ phải viết lại file store.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Store / repository</dt><dd>Lớp chứa mọi truy cập database cho một loại dữ liệu.</dd>
+<dt>Ánh xạ dòng</dt><dd>Chuyển một dòng database (<code>created_at</code>, chuỗi số) thành object JavaScript đúng kiểu (<code>createdAt</code>, số).</dd>
+<dt><code>bigint</code> về JS</dt><dd><code>pg</code> trả về chuỗi, vì số quá lớn có thể vượt giới hạn <code>number</code>.</dd>
+<dt><code>RETURNING</code></dt><dd>Lấy luôn dòng vừa thêm hay sửa trong cùng câu lệnh.</dd>
+<dt><code>null</code> khi không tìm thấy</dt><dd>Quy ước: hàm tìm một dòng trả <code>null</code> nếu không có, để route hoặc service quyết định trả 404.</dd>
+</dl>
+
+<h2>Làm thử: đoán trước khi chạy</h2>
 <p>Ghi vào notes kiểu JavaScript mà bạn nghĩ mỗi cột sẽ có, rồi mới chạy trên database <code>books</code> của <code>sql-practice</code>:</p>
 <pre><code>const { rows } = await pool.query(`
   SELECT count(*)              AS so_sach,
@@ -148,9 +166,26 @@ export async function updateBook(id: number, patch: BookPatch): Promise&lt;Book 
   <p><span class="wrong">"Đã ghi pool.query&lt;BookRow&gt; thì kiểu chắc chắn đúng."</span><span class="fix">Đó chỉ là lời hứa với TypeScript, không ai kiểm tra lúc chạy. Test trên database thật mới bắt được tên cột sai.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary><code>SELECT count(*) FROM books</code> qua <code>pg</code> trả về <code>{ count: '42' }</code>. Vì sao là chuỗi, xử lý ở đâu?</summary><div><p><code>count</code> là <code>bigint</code>, <code>pg</code> trả chuỗi để khỏi mất chính xác. Đổi sang số trong lớp store, một lần cho mọi nơi.</p></div></details>
+<details><summary>Route có nên viết SQL trực tiếp không?</summary><div><p>Không: route lo HTTP, store lo database. Route gọi hàm của store.</p></div></details>
+<details><summary>Thêm sách xong cần trả về sách vừa tạo kèm <code>id</code>. Có cần <code>SELECT</code> lại không?</summary><div><p>Không, dùng <code>INSERT ... RETURNING *</code>.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Vì sao node-postgres trả bigint về dạng chuỗi?</summary><div><p>Vì number của JavaScript chỉ biểu diễn chính xác số nguyên tới khoảng 9 triệu tỉ, còn bigint của PostgreSQL lớn hơn nhiều. Nếu tự đổi sang number, giá trị lớn sẽ bị làm tròn mà không ai biết. Thư viện chọn cách an toàn là trả chuỗi và để ứng dụng quyết định. Trong dự án học phí, tôi đổi bigint sang number ở một chỗ duy nhất, kèm kiểm tra Number.isSafeInteger để báo lỗi nếu có giá trị vượt giới hạn.</p></div></details>
   <details><summary>Repository hay lớp store dùng để làm gì?</summary><div><p>Nó gom mọi chi tiết về lưu trữ vào một chỗ: câu SQL, tên cột snake_case, cách đổi kiểu. Phần nghiệp vụ chỉ làm việc với object có kiểu rõ ràng và không biết dữ liệu nằm ở PostgreSQL hay ở đâu. Nhờ vậy đổi cách lưu không đụng tới quy tắc nghiệp vụ, và quy tắc nghiệp vụ test được mà không cần database.</p></div></details>
   <details><summary>Vì sao bạn không dùng SELECT * trong code ứng dụng?</summary><div><p>Vì kết quả của nó thay đổi mỗi khi schema thay đổi. Một cột mới, có thể là dữ liệu nội bộ, sẽ tự lọt ra API. Thứ tự và tên cột cũng không còn được ghi rõ trong code. Liệt kê cột giúp tôi thấy chính xác truy vấn trả về gì, và đọc ít dữ liệu hơn khi bảng có cột lớn.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Mọi SQL của một loại dữ liệu nằm trong lớp store, sau các hàm có kiểu rõ.</li>
+<li>Đổi kiểu từ database sang JavaScript (chuỗi số, tên cột) đúng một lần, ở store.</li>
+<li>Dùng <code>RETURNING</code> để lấy dòng vừa ghi; không tìm thấy thì trả <code>null</code>.</li>
+</ol>
 </div>

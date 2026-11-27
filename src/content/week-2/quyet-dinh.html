@@ -1,3 +1,21 @@
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Ra quyết định</strong> ở cuối tuần 2 là đếm số người đã cam kết thật, áp đúng luật đã viết từ tuần 1, rồi chọn: làm tiếp ý tưởng công cụ thu học phí, hay đổi sang ý tưởng khác. Quyết định được ghi lại thành một file ngắn trong repo.</p>
+<p>Hình dung trọng tài bóng đá: luật việt vị có trước trận đấu, trọng tài chỉ áp luật, không được sửa luật giữa trận vì đội nhà đang thua.</p>
+</div>
+
+<h2>Vì sao phải quyết định theo luật đã viết</h2>
+<p>Sau hai tuần bỏ công phỏng vấn, ai cũng muốn ý tưởng của mình là đúng. Nếu quyết định bằng cảm giác, bạn sẽ dễ tính cả lời hứa miệng là cam kết. Luật viết trước, và một file ghi lại lý do, giữ cho quyết định trung thực, và giúp bạn sau này nhìn lại hiểu vì sao mình đã chọn như vậy.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Luật quyết định</dt><dd>Ngưỡng viết từ tuần 1: từ 5 người chuyển cọc thì làm tiếp, dưới 5 thì đổi ý tưởng.</dd>
+<dt>Cam kết</dt><dd>Người dùng đã chuyển tiền thật, có hứa hoàn tiền. Lời hứa miệng không tính.</dd>
+<dt>Dời cột gôn</dt><dd>Thấy kết quả rồi mới nới tiêu chí cho vừa ý mình.</dd>
+<dt>ADR</dt><dd>Architecture Decision Record: file ngắn ghi bối cảnh, quyết định và hệ quả, lưu cùng code.</dd>
+<dt>Pivot</dt><dd>Đổi hướng: giữ phần đã học được, đổi ý tưởng hoặc đối tượng khách hàng.</dd>
+</dl>
+
 <h2>Áp luật đã viết từ tuần 1</h2>
 <p>Bạn đã viết luật quyết định trước khi gặp ai: <strong>từ 5 người cam kết trả trước thì làm tiếp, dưới 5 thì đổi ý tưởng</strong>. Và "cam kết" nghĩa là đã chuyển tiền thật, có hứa hoàn tiền. Việc hôm nay là đếm, rồi áp luật. Không phải viết lại luật.</p>
 <p>Cám dỗ lớn nhất lúc này là dời cột gôn: "3 người chuyển cọc, nhưng có 4 người hứa miệng chắc chắn sẽ trả, tính là 7 nhé". Đó chính là lý do bạn viết luật từ tuần 1. Nếu thật sự thấy luật sai, bạn được phép đổi luật cho lần kiểm chứng <em>sau</em>, và phải ghi lý do. Không đổi luật cho lần này.</p>
@@ -13,7 +31,7 @@
 </table></div>
 <p>Kết quả nào cũng là thành công của quá trình kiểm chứng. Thất bại thật là tiêu ba tháng để biết điều mà hai tuần đã có thể cho bạn biết.</p>
 
-<h2>Ghi quyết định: mượn khuôn của kỹ sư</h2>
+<h2>Làm thử: ghi quyết định, mượn khuôn của kỹ sư</h2>
 <p>Kỹ sư phần mềm ghi các quyết định kiến trúc quan trọng bằng <strong>ADR</strong> (Architecture Decision Record): một file ngắn có bối cảnh, quyết định và hệ quả, lưu cùng code. Bạn dùng đúng khuôn đó cho quyết định sản phẩm. Đặt file <code>validation/decision.md</code> cạnh các file phỏng vấn:</p>
 <pre><code># Quyết định 001: Làm tiếp / Đổi ý tưởng công cụ thu học phí
 
@@ -52,9 +70,26 @@ Làm tiếp / Đổi hướng / Đổi ý tưởng, vì ...
   <p><span class="wrong">"Quyết định trong đầu là đủ, viết ra làm gì."</span><span class="fix">Ba tháng sau bạn sẽ không nhớ vì sao. Và người phỏng vấn muốn thấy bạn quyết định dựa trên bằng chứng nào.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>3 người đã chuyển cọc, 4 người hứa "chắc chắn sẽ trả". Theo luật, kết quả là gì?</summary><div><p>3 cam kết, dưới 5: đổi ý tưởng. Lời hứa miệng không phải cam kết.</p></div></details>
+<details><summary>Nếu thấy luật quyết định thật sự sai thì làm gì?</summary><div><p>Ghi lại vì sao luật sai và sửa luật cho lần kiểm chứng sau, không sửa để đổi kết quả của lần này.</p></div></details>
+<details><summary>Đổi ý tưởng thì làm gì với tiền cọc đã nhận?</summary><div><p>Hoàn tiền ngay, như đã hứa khi nhận cọc.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Kể về một quyết định sản phẩm bạn đưa ra dựa trên dữ liệu.</summary><div><p>Kể theo khung: giả thuyết ban đầu, luật quyết định đặt trước, cách thu bằng chứng (10 cuộc phỏng vấn, landing page, lời mời đặt cọc), con số thật, quyết định, và điều bạn học được. Sau tuần 2 bạn có câu chuyện thật của mình. Hãy luyện kể nó trong 2 phút bằng tiếng Việt và 3 phút bằng tiếng Anh.</p></div></details>
   <details><summary>ADR là gì? Vì sao nên dùng?</summary><div><p>Architecture Decision Record là một tài liệu ngắn ghi một quyết định quan trọng: bối cảnh, lựa chọn, và hệ quả, lưu cùng code. Nó giúp người mới, và chính mình sau này, hiểu vì sao hệ thống như hiện tại, tránh tranh luận lại từ đầu, và biết khi nào nên xem lại quyết định.</p></div></details>
   <details><summary>Khi nào bạn quyết định dừng một ý tưởng?</summary><div><p>Khi bằng chứng không đạt ngưỡng mình đặt ra từ trước. Mình đặt ngưỡng trước khi thu dữ liệu để tránh tự lừa mình. Dừng không có nghĩa bỏ hết: mình giữ lại những gì học được về người dùng và vấn đề của họ, và thường đó là điểm xuất phát cho ý tưởng tiếp theo.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Đếm cam kết thật, áp đúng luật đã viết, không dời cột gôn.</li>
+<li>Ghi quyết định thành file kiểu ADR: bối cảnh, quyết định, hệ quả.</li>
+<li>Làm tiếp thì giữ lời hứa với người đã cọc; đổi ý tưởng thì hoàn tiền ngay.</li>
+</ol>
 </div>

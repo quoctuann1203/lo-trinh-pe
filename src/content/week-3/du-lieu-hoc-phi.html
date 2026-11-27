@@ -1,4 +1,22 @@
-<h2>Bắt đầu từ câu hỏi</h2>
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p>Bài này là bài tổng hợp của tuần 3: thiết kế các bảng đầu tiên cho <strong>công cụ thu học phí</strong>, bắt đầu từ câu hỏi giáo viên cần trả lời, rồi tạo dữ liệu mẫu và viết truy vấn trả lời câu hỏi đầu tiên.</p>
+<p>Hình dung may áo: thợ may đo người trước rồi mới cắt vải. Ở đây, "đo người" là liệt kê câu hỏi giáo viên hỏi mỗi tháng; "cắt vải" là viết <code>CREATE TABLE</code>.</p>
+</div>
+
+<h2>Vì sao bắt đầu từ câu hỏi, không từ bảng</h2>
+<p>Bảng thiết kế theo cảm tính thường thiếu đúng cột cần cho báo cáo quan trọng nhất, hoặc lưu dữ liệu theo cách khó cộng trừ. Bắt đầu từ câu hỏi thật ("ai chưa đóng đủ tháng này?"), bạn biết chắc mỗi bảng, mỗi cột tồn tại để trả lời câu nào.</p>
+
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Schema</dt><dd>Toàn bộ cấu trúc database: các bảng, cột, kiểu, ràng buộc.</dd>
+<dt>Thực thể</dt><dd>Một loại "thứ" cần lưu: lớp, học sinh, hoá đơn, khoản đóng.</dd>
+<dt>Quan hệ một-nhiều</dt><dd>Một lớp có nhiều học sinh; một hoá đơn có nhiều khoản đóng. Bảng "nhiều" giữ khoá ngoại.</dd>
+<dt>Dữ liệu mẫu (seed)</dt><dd>Dữ liệu giả để thử truy vấn và giao diện.</dd>
+<dt><code>generate_series</code></dt><dd>Hàm của Postgres sinh ra một dãy số hay dãy ngày, dùng để tạo nhanh nhiều dòng mẫu.</dd>
+</dl>
+
+<h2>Thiết kế hoạt động thế nào: bắt đầu từ câu hỏi</h2>
 <p>Đừng mở trình soạn thảo và gõ <code>CREATE TABLE</code> ngay. Mở ghi chép 10 cuộc phỏng vấn tuần 2, và viết ra những câu giáo viên cần trả lời mỗi tháng. Ví dụ:</p>
 <ol class="list">
   <li>Tháng này những học sinh nào chưa đóng đủ tiền, còn thiếu bao nhiêu?</li>
@@ -126,7 +144,7 @@ ANALYZE;   -- cập nhật thống kê để EXPLAIN đoán số dòng cho đún
 <p><code>(s.id - 1) % 200 + 1</code> dựa vào việc id lớp chạy từ 1 tới 200, điều chỉ đúng trên database vừa tạo lại. Vì vậy schema.sql bắt đầu bằng <code>DROP TABLE</code>. Chạy cả hai bằng một lệnh:</p>
 <pre><code>cat tuition/schema.sql tuition/seed.sql | docker compose exec -T db psql -U hoc -d hoc -v ON_ERROR_STOP=1</code></pre>
 
-<h2>Câu hỏi 1 thành truy vấn</h2>
+<h2>Làm thử: câu hỏi 1 thành truy vấn</h2>
 <p>"Tháng 3 năm 2026, học sinh nào của giáo viên số 1 chưa đóng đủ, còn thiếu bao nhiêu?"</p>
 <pre><code>SELECT s.name   AS hoc_sinh,
        c.name   AS lop,
@@ -152,9 +170,26 @@ ORDER BY con_thieu DESC, s.name;</code></pre>
   <p><span class="wrong">"Số tiền hoá đơn lấy từ học phí của lớp là đủ, lưu thêm là lặp dữ liệu."</span><span class="fix">Học phí đổi theo thời gian. Hoá đơn phải ghi lại số tiền tại lúc lập, không phải số tiền của hôm nay.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Một lớp có nhiều học sinh. Khoá ngoại đặt ở bảng nào?</summary><div><p>Ở bảng học sinh: mỗi học sinh có cột trỏ tới lớp của mình.</p></div></details>
+<details><summary>Vì sao lưu từng khoản đóng thành dòng riêng, không chỉ lưu cột "đã đóng" trên hoá đơn?</summary><div><p>Phụ huynh có thể đóng nhiều lần; có từng khoản thì biết đóng lúc nào, bao nhiêu, và tính được còn thiếu.</p></div></details>
+<details><summary>Dữ liệu mẫu nên có những trường hợp khó nào?</summary><div><p>Học sinh chưa đóng đồng nào, đóng thiếu, đóng dư, đóng nhiều lần, và lớp chưa có học sinh.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Bạn thiết kế schema cho một tính năng mới thế nào?</summary><div><p>Tôi bắt đầu từ những câu hỏi mà người dùng và màn hình cần trả lời, rồi rút ra các thực thể và quan hệ giữa chúng, xác định quan hệ một nhiều hay nhiều nhiều. Sau đó tôi chọn ràng buộc để database chặn những trạng thái không thể có, như hoá đơn cho học sinh không thuộc lớp. Cuối cùng tôi viết thử từng truy vấn trên dữ liệu mẫu đủ lớn để kiểm tra schema có trả lời được không và có chạy nhanh không.</p></div></details>
   <details><summary>Quan hệ nhiều nhiều lưu thế nào?</summary><div><p>Bằng một bảng nối chứa khoá ngoại tới hai bảng, với khoá chính là cặp hai khoá đó để không lặp. Bảng nối thường mang thêm thông tin của chính quan hệ, như ngày học sinh vào lớp và ngày nghỉ.</p></div></details>
   <details><summary>Vì sao lưu từng khoản thanh toán thay vì một cột trạng thái?</summary><div><p>Vì thanh toán ngoài đời không gọn gàng: đóng thiếu, đóng nhiều lần, hoàn tiền. Lưu từng khoản như một sổ ghi chép chỉ thêm không sửa, thì trạng thái hoá đơn luôn tính lại được và có lịch sử để đối soát khi phụ huynh thắc mắc. Nếu cần đọc nhanh, có thể lưu thêm trạng thái tính sẵn, nhưng nguồn sự thật vẫn là các khoản thanh toán.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Bắt đầu từ câu hỏi giáo viên cần trả lời, rồi mới ra bảng và cột.</li>
+<li>Quan hệ một-nhiều: bảng "nhiều" giữ khoá ngoại; mỗi khoản đóng là một dòng.</li>
+<li>Sinh dữ liệu mẫu có cả trường hợp khó, rồi viết truy vấn trả lời từng câu hỏi.</li>
+</ol>
 </div>

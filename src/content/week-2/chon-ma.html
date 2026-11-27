@@ -1,3 +1,9 @@
+<div class="tldr">
+<p class="tldr-label">Trong một câu</p>
+<p><strong>Chọn mã trạng thái</strong> là quyết định con số 3 chữ số ở đầu mỗi response. Bài này cho bạn sáu câu hỏi có/không, hỏi theo thứ tự, để lỗi nào cũng ra đúng một mã.</p>
+<p>Hình dung bác sĩ khám bệnh theo một bảng câu hỏi cố định: sốt không? ho không? đau ở đâu? Hỏi đúng thứ tự thì ai khám cũng ra cùng kết luận. Cây quyết định mã trạng thái làm việc giống vậy cho API.</p>
+</div>
+
 <h2>Vì sao cần một cây quyết định</h2>
 <p>Ở tuần 1 bạn đã có bảng các mã trạng thái. Nhưng khi đang viết code, câu hỏi thật là: "<em>lỗi này</em> nên trả mã nào?". Một lỗi có thể nghe giống nhiều mã cùng lúc. Cây dưới đây biến việc đó thành sáu câu hỏi có/không, hỏi theo đúng thứ tự mà một request thường đi qua server: middleware xác thực, rồi phân quyền, rồi đọc body, validate, tìm dữ liệu, và kiểm tra xung đột.</p>
 
@@ -52,7 +58,17 @@
   <figcaption>Thứ tự trên là thứ tự hay gặp khi xác thực nằm trong middleware. Server thật có thể đổi chỗ vài bước, nhưng mỗi câu hỏi luôn ứng với đúng một mã.</figcaption>
 </figure>
 
-<h2>Đi qua từng câu hỏi</h2>
+<h2>Từ khoá cần biết</h2>
+<dl class="terms">
+<dt>Mã trạng thái</dt><dd>Con số đầu response: 2xx thành công, 4xx lỗi phía người gọi, 5xx lỗi phía server.</dd>
+<dt>Cây quyết định</dt><dd>Chuỗi câu hỏi có/không theo thứ tự; câu đầu tiên trả lời "sai" quyết định kết quả.</dd>
+<dt>Xác thực</dt><dd>Biết người gọi là ai. Thiếu hoặc sai: 401.</dd>
+<dt>Phân quyền</dt><dd>Người đó có được làm việc này không. Không được: 403.</dd>
+<dt>Validate</dt><dd>Dữ liệu có đúng quy tắc không. Sai: 400 hoặc 422.</dd>
+<dt>Xung đột</dt><dd>Dữ liệu đúng nhưng va với trạng thái hiện có, như ISBN đã tồn tại: 409.</dd>
+</dl>
+
+<h2>Cây quyết định hoạt động thế nào: đi qua từng câu hỏi</h2>
 <h3>1. Bạn là ai? Sai thì 401</h3>
 <p>Request không mang thông tin đăng nhập, hoặc thông tin đó sai hay hết hạn. Server không biết bạn là ai. Đăng nhập lại có thể giải quyết. Response 401 nên kèm header <code>WWW-Authenticate</code> cho client biết cách xác thực mà server chấp nhận, ví dụ <code>WWW-Authenticate: Bearer</code>.</p>
 <h3>2. Bạn có được làm việc này không? Không thì 403</h3>
@@ -68,7 +84,7 @@
 <h3>Qua hết: 2xx. Bất ngờ: 500</h3>
 <p><code>200</code> khi trả dữ liệu, <code>201</code> khi vừa tạo mới (kèm <code>Location</code>), <code>204</code> khi thành công mà không có gì để trả. Còn lỗi bất ngờ ở bất kỳ bước nào thì là 500, ghi log đầy đủ ở server và trả một thông báo chung cho client.</p>
 
-<h2>Luyện tay: chọn mã cho các tình huống</h2>
+<h2>Làm thử: chọn mã cho các tình huống</h2>
 <p>Che cột bên phải, tự trả lời, rồi mới xem.</p>
 <div class="tbl"><table>
   <thead><tr><th>Tình huống trong công cụ thu học phí</th><th>Mã</th></tr></thead>
@@ -93,9 +109,26 @@
   <p><span class="wrong">"Lỗi gì không rõ cứ trả 400 cho an toàn."</span><span class="fix">Sai. Bug của server mà trả 4xx là đổ lỗi cho client, và client sẽ không bao giờ thử lại. Lỗi bất ngờ là 500.</span></p>
 </div>
 
+<h2>Tự kiểm tra</h2>
+<p>Tự trả lời trước, rồi mới bấm mở đáp án.</p>
+<div class="qa">
+<details><summary>Request thiếu API key và body cũng sai định dạng. Trả mã gì?</summary><div><p>401. Câu hỏi về xác thực đứng trước câu hỏi về body; câu đầu tiên sai quyết định mã.</p></div></details>
+<details><summary>Tạo sách với ISBN đã có trong kho. Trả mã gì?</summary><div><p>409: dữ liệu tự nó hợp lệ, chỉ xung đột với dữ liệu đang có.</p></div></details>
+<details><summary>Code tính học phí bị lỗi chia cho 0. Trả mã gì?</summary><div><p>500: lỗi ngoài dự kiến ở server, không phải lỗi của người gọi.</p></div></details>
+</div>
+
 <h2>Câu hỏi phỏng vấn</h2>
 <div class="qa">
   <details><summary>Một API nhận request tạo hóa đơn. Hãy kể các mã lỗi có thể trả và khi nào.</summary><div><p>401 nếu không có hoặc sai token. 403 nếu người gọi không phải giáo viên của lớp đó. 400 nếu body không đọc được. 422 nếu số tiền âm hay tháng không hợp lệ. 404 nếu học sinh không tồn tại. 409 nếu học sinh đã có hóa đơn tháng đó. 500 cho lỗi bất ngờ. Thành công trả 201 kèm <code>Location</code>.</p></div></details>
   <details><summary>Khi nào bạn trả 404 thay vì 403?</summary><div><p>Khi chỉ riêng việc thừa nhận tài nguyên tồn tại đã là lộ thông tin, ví dụ hóa đơn của giáo viên khác hay hồ sơ học sinh không thuộc lớp mình. Trả 404 thì người không có quyền không phân biệt được "không tồn tại" với "không được xem".</p></div></details>
   <details><summary>400 và 422 khác nhau thế nào? Bạn có bắt buộc phải dùng 422 không?</summary><div><p>400 là request sai hình thức, server không đọc được. 422 là đọc được nhưng nội dung vi phạm quy tắc. Không bắt buộc: nhiều API dùng 400 cho cả hai. Điều quan trọng là thống nhất trong toàn API và ghi rõ trong tài liệu.</p></div></details>
+</div>
+
+<div class="recap">
+<p class="tldr-label">Nhớ 3 ý</p>
+<ol>
+<li>Hỏi theo thứ tự request đi qua server: xác thực, phân quyền, đọc body, validate, tìm dữ liệu, xung đột.</li>
+<li>Câu đầu tiên trả lời "sai" quyết định mã: 401, 403, 400, 422, 404, 409.</li>
+<li>Qua hết thì 2xx; lỗi bất ngờ trong code là 500.</li>
+</ol>
 </div>
